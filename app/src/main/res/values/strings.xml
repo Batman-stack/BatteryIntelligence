@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Battery Intelligence</string>
+    <string name="widget_circular_desc">Circular battery level and live charging ring</string>
+    <string name="widget_compact_desc">Compact live current, power, and temperature bar</string>
+    <string name="widget_detailed_desc">Detailed telemetry, health, and target alarm card</string>
+</resources>
