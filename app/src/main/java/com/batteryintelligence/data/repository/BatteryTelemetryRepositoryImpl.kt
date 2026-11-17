@@ -19,11 +19,11 @@ class BatteryTelemetryRepositoryImpl @Inject constructor(
 ) : BatteryTelemetryRepository {
 
     override suspend fun getCurrentSnapshot(): BatterySnapshot {
-        return batteryHardwareDataSource.getCurrentSnapshot()
+        return batteryHardwareDataSource.readSnapshot()
     }
 
     override fun observeLiveTelemetry(samplingIntervalMs: Long): Flow<BatterySnapshot> {
-        return batteryHardwareDataSource.observeBatteryTelemetry(samplingIntervalMs)
+        return batteryHardwareDataSource.observeBatteryChanges(samplingIntervalMs)
     }
 
     override suspend fun recordSample(snapshot: BatterySnapshot) {

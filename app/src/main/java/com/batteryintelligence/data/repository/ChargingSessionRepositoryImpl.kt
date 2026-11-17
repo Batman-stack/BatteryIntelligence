@@ -41,7 +41,7 @@ class ChargingSessionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getHealthReport(): BatteryHealthReport {
-        val snapshot = batteryHardwareDataSource.getCurrentSnapshot()
+        val snapshot = batteryHardwareDataSource.readSnapshot()
         val prefs = preferencesRepository.preferences.first()
         val completedSessions = chargingSessionDao.getCompletedSessionsWithCapacityEstimate(20)
 
