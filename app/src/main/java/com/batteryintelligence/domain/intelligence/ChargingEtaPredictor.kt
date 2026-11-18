@@ -23,7 +23,7 @@ class ChargingEtaPredictor @Inject constructor() {
     )
 
     private val samples = ArrayDeque<EtaSample>(MAX_WINDOW_SAMPLES)
-    private var sessionStartTimeMs: Long = 0L
+    private var sessionStartTimeMs: Long = -1L
     private var sessionStartLevel: Float? = null
     private var peakObservedCurrentMa: Double = 0.0
     private var ccCvKneePercent: Float = DEFAULT_TAPER_KNEE_PERCENT
@@ -31,7 +31,7 @@ class ChargingEtaPredictor @Inject constructor() {
     @Synchronized
     fun reset() {
         samples.clear()
-        sessionStartTimeMs = 0L
+        sessionStartTimeMs = -1L
         sessionStartLevel = null
         peakObservedCurrentMa = 0.0
         ccCvKneePercent = DEFAULT_TAPER_KNEE_PERCENT
@@ -78,7 +78,7 @@ class ChargingEtaPredictor @Inject constructor() {
         val currentLevel = snapshot.levelPrecisePercent ?: snapshot.levelPercent?.toFloat()
             ?: return null to ChargingPhase.UNKNOWN
 
-        if (sessionStartTimeMs == 0L) {
+        if (sessionStartTimeMs == -1L) {
             sessionStartTimeMs = snapshot.timestampMs
             sessionStartLevel = currentLevel
         }

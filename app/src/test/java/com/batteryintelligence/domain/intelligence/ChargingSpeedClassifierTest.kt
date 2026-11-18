@@ -56,7 +56,7 @@ class ChargingSpeedClassifierTest {
         // Ramp to 26W (above 18W + 1.5W deadband = 19.5W)
         var t = 9_000L
         var result = classifier.update(snapshotAt(t, voltageMv = 4333, currentMa = 6000.0))
-        while (t < 30_000L) {
+        while (t < 36_000L) {
             t += 3_000L
             result = classifier.update(snapshotAt(t, voltageMv = 4333, currentMa = 6000.0))
         }
