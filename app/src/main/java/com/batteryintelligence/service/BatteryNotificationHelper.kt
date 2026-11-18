@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.batteryintelligence.domain.model.BatterySnapshot
+import com.batteryintelligence.domain.model.ChargingIntelligenceState
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
@@ -43,7 +44,7 @@ class BatteryNotificationHelper @Inject constructor(
             "Smart Charging & Thermal Alarms",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Alerts when battery reaches your 80%–100% target or temperature limit."
+            description = "Alerts when battery reaches your 50%–100% target, low battery threshold, or thermal limit."
             enableVibration(true)
         }
 
@@ -54,25 +55,37 @@ class BatteryNotificationHelper @Inject constructor(
     fun buildMonitoringNotification(
         snapshot: BatterySnapshot?,
         targetChargePercent: Int,
-        targetAlarmTriggered: Boolean
+        targetAlarmTriggered: Boolean,
+        intelligenceState: ChargingIntelligenceState? = null
     ): Notification {
-        val levelText = snapshot?.levelPercent?.let { "$it%" } ?: "Not Available"
-        val currentText = snapshot?.currentNowMa?.let {
-            String.format(Locale.US, "%+.0f mA", it)
-        } ?: "Current: Not Available"
-        val powerText = snapshot?.powerWatts?.let {
+        val levelText = snapshot?.levelPercent?.let { "$it%" } ?: "--%"
+        val currentMa = intelligenceState?.smoothedCurrentMa ?: snapshot?.effectiveCurrentMa
+        val currentText = currentMa?.let {
+            String.format(Locale.US, "%.0f mA", kotlin.math.abs(it))
+        } ?: "-- mA"
+        val powerWatts = intelligenceState?.smoothedPowerWatts ?: snapshot?.powerWatts
+        val powerText = powerWatts?.let {
             String.format(Locale.US, "%.1f W", it)
-        } ?: "Power: Not Available"
+        } ?: "-- W"
         val tempText = snapshot?.temperatureCelsius?.let {
             String.format(Locale.US, "%.1f°C", it)
-        } ?: "Temp: Not Available"
+        } ?: "--°C"
+
+        val etaSuffix = intelligenceState?.etaEstimate?.timeToTargetMs
+            ?.takeIf { it > 0L && snapshot?.chargingSource?.isPlugged == true }
+            ?.let { ms ->
+                val mins = (ms / 60_000L).coerceAtLeast(1L)
+                val h = mins / 60L
+                val m = mins % 60L
+                if (h > 0) " • ~${h}h ${m}m" else " • ~${m}m"
+            }.orEmpty()
 
         val statusTitle = when {
             snapshot == null -> "Battery Intelligence Active"
             targetAlarmTriggered && snapshot.chargingSource.isPlugged ->
                 "Target $targetChargePercent% Reached • $levelText"
             snapshot.chargingSource.isPlugged ->
-                "Charging $levelText • Target $targetChargePercent%"
+                "${intelligenceState?.speedTier?.displayLabel ?: "Charging"} $levelText$etaSuffix"
             else ->
                 "Monitoring $levelText • Target $targetChargePercent%"
         }
@@ -139,14 +152,7 @@ class BatteryNotificationHelper @Inject constructor(
             )
             .build()
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationManager.notify(TARGET_ALARM_NOTIFICATION_ID, notification)
-        }
+        notifyIfPermitted(TARGET_ALARM_NOTIFICATION_ID, notification)
     }
 
     fun showHighTemperatureAlert(
@@ -170,14 +176,54 @@ class BatteryNotificationHelper @Inject constructor(
             .setContentIntent(createLaunchPendingIntent())
             .build()
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationManager.notify(TEMP_ALARM_NOTIFICATION_ID, notification)
-        }
+        notifyIfPermitted(TEMP_ALARM_NOTIFICATION_ID, notification)
+    }
+
+    fun showThermalSlopeAlert(
+        slopeCPerMin: Float,
+        thresholdCPerMin: Float,
+        currentTempCelsius: Float?
+    ) {
+        if (!hasPostNotificationsPermission()) return
+
+        val slopeText = String.format(Locale.US, "+%.2f°C/min", slopeCPerMin)
+        val limitText = String.format(Locale.US, "%.1f°C/min", thresholdCPerMin)
+        val tempDetail = currentTempCelsius?.let { String.format(Locale.US, " (now %.1f°C)", it) }.orEmpty()
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_SMART_ALARM_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("Rapid Battery Heating ($slopeText)")
+            .setContentText(
+                "Temperature rising faster than $limitText$tempDetail. Check airflow or charger load."
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(createLaunchPendingIntent())
+            .build()
+
+        notifyIfPermitted(THERMAL_SLOPE_NOTIFICATION_ID, notification)
+    }
+
+    fun showLowBatteryAlert(
+        currentLevelPercent: Int,
+        thresholdPercent: Int
+    ) {
+        if (!hasPostNotificationsPermission()) return
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_SMART_ALARM_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("Low Battery Warning ($currentLevelPercent%)")
+            .setContentText(
+                "Battery dropped to your $thresholdPercent% threshold. Plug in to preserve cell longevity."
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(createLaunchPendingIntent())
+            .build()
+
+        notifyIfPermitted(LOW_BATTERY_NOTIFICATION_ID, notification)
     }
 
     fun cancelTargetChargeAlarm() {
@@ -187,23 +233,28 @@ class BatteryNotificationHelper @Inject constructor(
     fun updateMonitoringNotification(
         snapshot: BatterySnapshot?,
         targetChargePercent: Int,
-        targetAlarmTriggered: Boolean
+        targetAlarmTriggered: Boolean,
+        intelligenceState: ChargingIntelligenceState? = null
     ) {
         if (!hasPostNotificationsPermission()) return
 
         val notification = buildMonitoringNotification(
             snapshot = snapshot,
             targetChargePercent = targetChargePercent,
-            targetAlarmTriggered = targetAlarmTriggered
+            targetAlarmTriggered = targetAlarmTriggered,
+            intelligenceState = intelligenceState
         )
+        notifyIfPermitted(MONITOR_NOTIFICATION_ID, notification)
+    }
 
+    private fun notifyIfPermitted(notificationId: Int, notification: Notification) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            notificationManager.notify(MONITOR_NOTIFICATION_ID, notification)
+            notificationManager.notify(notificationId, notification)
         }
     }
 
@@ -236,6 +287,8 @@ class BatteryNotificationHelper @Inject constructor(
         const val MONITOR_NOTIFICATION_ID = 1001
         const val TARGET_ALARM_NOTIFICATION_ID = 1002
         const val TEMP_ALARM_NOTIFICATION_ID = 1003
+        const val THERMAL_SLOPE_NOTIFICATION_ID = 1004
+        const val LOW_BATTERY_NOTIFICATION_ID = 1005
 
         private const val REQUEST_LAUNCH_APP = 2001
         private const val REQUEST_STOP_SERVICE = 2002

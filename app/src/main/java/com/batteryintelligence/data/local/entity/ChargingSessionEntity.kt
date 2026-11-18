@@ -5,12 +5,15 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.batteryintelligence.domain.model.ChargingSource
+import com.batteryintelligence.domain.model.ChargingSpeedTier
+import com.batteryintelligence.domain.model.ChargingTerminationReason
 
 @Entity(
     tableName = "charging_sessions",
     indices = [
         Index(value = ["start_time_ms"]),
-        Index(value = ["is_active"])
+        Index(value = ["is_active"]),
+        Index(value = ["charging_source", "start_time_ms"])
     ]
 )
 data class ChargingSessionEntity(
@@ -65,5 +68,33 @@ data class ChargingSessionEntity(
     @ColumnInfo(name = "estimated_capacity_mah")
     val estimatedCapacityMah: Double?,
     @ColumnInfo(name = "is_active")
-    val isActive: Boolean
+    val isActive: Boolean,
+    @ColumnInfo(name = "duration_ms", defaultValue = "0")
+    val durationMs: Long = 0L,
+    @ColumnInfo(name = "current_sum_ma", defaultValue = "0.0")
+    val currentSumMa: Double = 0.0,
+    @ColumnInfo(name = "power_sum_watts", defaultValue = "0.0")
+    val powerSumWatts: Double = 0.0,
+    @ColumnInfo(name = "telemetry_sample_count", defaultValue = "0")
+    val telemetrySampleCount: Int = 0,
+    @ColumnInfo(name = "avg_current_ma")
+    val avgCurrentMa: Double? = null,
+    @ColumnInfo(name = "avg_power_watts")
+    val avgPowerWatts: Double? = null,
+    @ColumnInfo(name = "avg_temperature_celsius")
+    val avgTemperatureCelsius: Float? = null,
+    @ColumnInfo(name = "peak_thermal_slope_c_per_min")
+    val peakThermalSlopeCPerMin: Float? = null,
+    @ColumnInfo(name = "termination_reason", defaultValue = "'ACTIVE'")
+    val terminationReason: ChargingTerminationReason = ChargingTerminationReason.ACTIVE,
+    @ColumnInfo(name = "dominant_speed_tier")
+    val dominantSpeedTier: ChargingSpeedTier? = null,
+    @ColumnInfo(name = "cc_cv_transition_percent")
+    val ccCvTransitionPercent: Int? = null,
+    @ColumnInfo(name = "cc_cv_transition_time_ms")
+    val ccCvTransitionTimeMs: Long? = null,
+    @ColumnInfo(name = "initial_eta_100_ms")
+    val initialEta100Ms: Long? = null,
+    @ColumnInfo(name = "eta_error_100_ms")
+    val etaError100Ms: Long? = null
 )

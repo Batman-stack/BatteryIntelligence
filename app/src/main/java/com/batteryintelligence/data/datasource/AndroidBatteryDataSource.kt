@@ -28,6 +28,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Singleton
@@ -42,6 +43,18 @@ class AndroidBatteryDataSource @Inject constructor(
     private val hardwareCacheMutex = Mutex()
     private var designCapacityEvaluated = false
     private var cachedDesignCapacity: Pair<Double?, MetricSource> = null to MetricSource.UNAVAILABLE
+
+    @Volatile
+    private var lastValidTempCelsius: Float? = null
+    @Volatile
+    private var lastValidTempTimeMs: Long = 0L
+
+    private var prevChargeCounterUah: Long? = null
+    private var prevChargeCounterTimeMs: Long = 0L
+
+    private var chargingPositiveVotes = 0
+    private var chargingNegativeVotes = 0
+    private var calibratedChargingPositive: Boolean? = null
 
     override suspend fun readSnapshot(): BatterySnapshot = withContext(Dispatchers.IO) {
         val stickyIntent = readStickyBatteryIntent()
@@ -109,17 +122,26 @@ class AndroidBatteryDataSource @Inject constructor(
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
 
-        val temperatureCelsius = resolveTemperatureCelsius(intent)
+        val temperatureCelsius = resolveTemperatureCelsius(intent, nowMs)
         val voltageMv = resolveVoltageMv(intent)
-
-        val currentNowMa = readLongPropertySafely(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-            ?.let(BatteryMetricNormalizer::normalizeCurrentToMilliamps)
-
-        val currentAverageMa = readLongPropertySafely(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
-            ?.let(BatteryMetricNormalizer::normalizeCurrentToMilliamps)
 
         val chargeCounterUah = readLongPropertySafely(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
             ?.let(BatteryMetricNormalizer::normalizeChargeCounterUah)
+
+        val chargeCounterRateMaHint = computeChargeCounterRateMa(chargeCounterUah, nowMs)
+
+        val rawCurrentNowMa = readLongPropertySafely(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+            ?.let { BatteryMetricNormalizer.normalizeCurrentToMilliamps(it, chargeCounterRateMaHint) }
+
+        val rawCurrentAvgMa = readLongPropertySafely(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
+            ?.let { BatteryMetricNormalizer.normalizeCurrentToMilliamps(it, chargeCounterRateMaHint) }
+
+        val (signedCurrentNowMa, isNetDrainNow, currentSource) = resolveCalibratedCurrent(
+            rawNowMa = rawCurrentNowMa,
+            rawAvgMa = rawCurrentAvgMa,
+            chargeCounterRateMa = chargeCounterRateMaHint,
+            chargingStatus = chargingStatus
+        )
 
         val energyCounterNwh = readLongPropertySafely(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
             ?.let(BatteryMetricNormalizer::normalizeEnergyCounterNwh)
@@ -148,8 +170,10 @@ class AndroidBatteryDataSource @Inject constructor(
             technology = technology,
             temperatureCelsius = temperatureCelsius,
             voltageMv = voltageMv,
-            currentNowMa = currentNowMa,
-            currentAverageMa = currentAverageMa,
+            currentNowMa = signedCurrentNowMa,
+            currentAverageMa = rawCurrentAvgMa,
+            signedCurrentMa = signedCurrentNowMa,
+            isNetBatteryDischargingWhilePlugged = isNetDrainNow,
             chargeCounterUah = chargeCounterUah,
             energyCounterNwh = energyCounterNwh,
             cycleCount = cycleCount,
@@ -159,9 +183,79 @@ class AndroidBatteryDataSource @Inject constructor(
             telemetrySources = BatteryTelemetrySources(
                 cycleCountSource = cycleCountSource,
                 stateOfHealthSource = sohSource,
-                designCapacitySource = designCapacitySource
+                designCapacitySource = designCapacitySource,
+                currentSource = currentSource
             )
         )
+    }
+
+    private suspend fun computeChargeCounterRateMa(
+        chargeCounterUah: Long?,
+        nowMs: Long
+    ): Double? = hardwareCacheMutex.withLock {
+        if (chargeCounterUah == null) return@withLock null
+        val prevUah = prevChargeCounterUah
+        val prevMs = prevChargeCounterTimeMs
+        if (prevUah == null || prevMs <= 0L) {
+            prevChargeCounterUah = chargeCounterUah
+            prevChargeCounterTimeMs = nowMs
+            return@withLock null
+        }
+        val dtMs = nowMs - prevMs
+        if (dtMs < CHARGE_COUNTER_WINDOW_MS) {
+            return@withLock null
+        }
+        val deltaUah = chargeCounterUah - prevUah
+        prevChargeCounterUah = chargeCounterUah
+        prevChargeCounterTimeMs = nowMs
+        if (deltaUah == 0L) return@withLock null
+        val dtHours = dtMs / 3_600_000.0
+        val rateMa = (deltaUah / 1000.0) / dtHours
+        rateMa.takeIf { it.isFinite() && abs(it) in 5.0..30_000.0 }
+    }
+
+    private suspend fun resolveCalibratedCurrent(
+        rawNowMa: Double?,
+        rawAvgMa: Double?,
+        chargeCounterRateMa: Double?,
+        chargingStatus: ChargingStatus
+    ): Triple<Double?, Boolean, MetricSource> = hardwareCacheMutex.withLock {
+        val primaryRaw = rawNowMa ?: rawAvgMa
+        val source = when {
+            rawNowMa != null -> MetricSource.BATTERY_MANAGER
+            rawAvgMa != null -> MetricSource.BATTERY_MANAGER
+            chargeCounterRateMa != null -> MetricSource.SESSION_DERIVED
+            else -> MetricSource.UNAVAILABLE
+        }
+
+        if (primaryRaw != null && chargingStatus == ChargingStatus.CHARGING) {
+            if (primaryRaw > 0.0) chargingPositiveVotes++ else if (primaryRaw < 0.0) chargingNegativeVotes++
+            if (calibratedChargingPositive == null && (chargingPositiveVotes >= 3 || chargingNegativeVotes >= 3)) {
+                calibratedChargingPositive = chargingPositiveVotes >= chargingNegativeVotes
+            }
+        } else if (primaryRaw != null && chargingStatus == ChargingStatus.DISCHARGING) {
+            // During active discharging, opposite polarity implies charging sign
+            if (primaryRaw < 0.0) chargingPositiveVotes++ else if (primaryRaw > 0.0) chargingNegativeVotes++
+            if (calibratedChargingPositive == null && (chargingPositiveVotes >= 5 || chargingNegativeVotes >= 5)) {
+                calibratedChargingPositive = chargingPositiveVotes >= chargingNegativeVotes
+            }
+        }
+
+        if (primaryRaw != null) {
+            val (calibratedSigned, isNetDrain) = BatteryMetricNormalizer.calibratePolarity(
+                rawCurrentMa = primaryRaw,
+                chargingStatus = chargingStatus,
+                chargingPolarityPositive = calibratedChargingPositive
+            )
+            return@withLock Triple(calibratedSigned, isNetDrain, source)
+        }
+
+        if (chargeCounterRateMa != null) {
+            val isNetDrain = chargingStatus == ChargingStatus.CHARGING && chargeCounterRateMa < 0.0
+            return@withLock Triple(chargeCounterRateMa, isNetDrain, MetricSource.SESSION_DERIVED)
+        }
+
+        Triple(null, false, MetricSource.UNAVAILABLE)
     }
 
     private fun resolveBatteryLevel(intent: Intent?): Pair<Int?, Float?> {
@@ -236,13 +330,23 @@ class AndroidBatteryDataSource @Inject constructor(
         }
     }
 
-    private fun resolveTemperatureCelsius(intent: Intent?): Float? {
+    private fun resolveTemperatureCelsius(intent: Intent?, nowMs: Long): Float? {
+        val recentTemp = if (nowMs - lastValidTempTimeMs <= 30_000L) lastValidTempCelsius else null
         val rawExtra = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
             ?: Int.MIN_VALUE
-        BatteryMetricNormalizer.normalizeTemperatureCelsius(rawExtra)?.let { return it }
+        BatteryMetricNormalizer.normalizeTemperatureCelsius(rawExtra, recentTemp)?.let {
+            lastValidTempCelsius = it
+            lastValidTempTimeMs = nowMs
+            return it
+        }
 
         val sysfsTemp = readSysfsInt(SYSFS_TEMP_PATHS)
-        return sysfsTemp?.let(BatteryMetricNormalizer::normalizeTemperatureCelsius)
+        return sysfsTemp?.let {
+            BatteryMetricNormalizer.normalizeTemperatureCelsius(it, recentTemp)
+        }?.also {
+            lastValidTempCelsius = it
+            lastValidTempTimeMs = nowMs
+        }
     }
 
     private fun resolveVoltageMv(intent: Intent?): Int? {
@@ -274,8 +378,6 @@ class AndroidBatteryDataSource @Inject constructor(
     }
 
     private fun resolveHardwareStateOfHealth(): Pair<Int?, MetricSource> {
-        // Android 14+ (API 34+) defines BATTERY_PROPERTY_STATE_OF_HEALTH = 10 as a system property;
-        // query safely without direct @SystemApi reference and validate against 1..100.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val propSoh = readIntPropertySafely(BATTERY_PROPERTY_STATE_OF_HEALTH_ID)
                 ?.let(BatteryMetricNormalizer::normalizeStateOfHealth)
@@ -378,6 +480,7 @@ class AndroidBatteryDataSource @Inject constructor(
 
     private companion object {
         const val BATTERY_PROPERTY_STATE_OF_HEALTH_ID = 10
+        const val CHARGE_COUNTER_WINDOW_MS = 30_000L
 
         val SYSFS_CYCLE_COUNT_PATHS = listOf(
             "/sys/class/power_supply/battery/cycle_count",

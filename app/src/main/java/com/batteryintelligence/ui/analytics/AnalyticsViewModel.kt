@@ -3,8 +3,10 @@ package com.batteryintelligence.ui.analytics
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.batteryintelligence.domain.model.AppPowerUsageSummary
+import com.batteryintelligence.domain.model.DailyBatteryRollup
 import com.batteryintelligence.domain.model.OvernightLog
 import com.batteryintelligence.domain.repository.AppUsageRepository
+import com.batteryintelligence.domain.repository.ChargingSessionRepository
 import com.batteryintelligence.domain.repository.OvernightLogRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +20,8 @@ import javax.inject.Inject
 @HiltViewModel
 class AnalyticsViewModel @Inject constructor(
     private val appUsageRepository: AppUsageRepository,
-    overnightLogRepository: OvernightLogRepository
+    overnightLogRepository: OvernightLogRepository,
+    chargingSessionRepository: ChargingSessionRepository
 ) : ViewModel() {
 
     private val _appUsage = MutableStateFlow<List<AppPowerUsageSummary>>(emptyList())
@@ -29,6 +32,14 @@ class AnalyticsViewModel @Inject constructor(
 
     val overnightLogs: StateFlow<List<OvernightLog>> = overnightLogRepository
         .observeRecentLogs(limit = 14)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    val dailyRollups: StateFlow<List<DailyBatteryRollup>> = chargingSessionRepository
+        .observeDailyRollups(limit = 14)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

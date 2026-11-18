@@ -1,5 +1,10 @@
 package com.batteryintelligence.ui.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,17 +14,39 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Card
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.batteryintelligence.domain.model.AppThemeMode
+import com.batteryintelligence.domain.model.SpeedTierThresholds
+import com.batteryintelligence.ui.components.TactileCard
+import com.batteryintelligence.ui.theme.LocalBatterySemanticColors
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -27,53 +54,120 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val serviceNotice by viewModel.serviceNotice.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val semantic = LocalBatterySemanticColors.current
+
+    var showCapacityDialog by remember { mutableStateOf(false) }
+    var showSpeedTierDialog by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.setForegroundServiceEnabled(true)
+        }
+    }
+
+    if (serviceNotice != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissServiceNotice() },
+            title = { Text("Foreground Service Notice") },
+            text = { Text(serviceNotice.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissServiceNotice() }) {
+                    Text("OK", color = semantic.emeraldText)
+                }
+            }
+        )
+    }
+
+    if (showCapacityDialog) {
+        DesignCapacityOverrideDialog(
+            currentOverride = prefs.userDesignCapacityMahOverride,
+            onDismiss = { showCapacityDialog = false },
+            onSave = { value ->
+                viewModel.updateDesignCapacityOverride(value)
+                showCapacityDialog = false
+            }
+        )
+    }
+
+    if (showSpeedTierDialog) {
+        SpeedThresholdsDialog(
+            current = prefs.speedTierThresholds,
+            onDismiss = { showSpeedTierDialog = false },
+            onSave = { thresholds ->
+                viewModel.updateSpeedTierThresholds(thresholds)
+                showSpeedTierDialog = false
+            }
+        )
+    }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "Monitoring Service", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "Foreground Service", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = "Keep live telemetry monitoring active via a foreground notification.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = prefs.foregroundServiceEnabled,
-                            onCheckedChange = { viewModel.setForegroundServiceEnabled(it) }
+            TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
+                Text(text = "Monitoring Service", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Always-On Foreground Service", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "Continuously captures high-resolution charging curves and fires smart alarms even when closed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "Smart Notifications", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = "Alert when thermal threshold or target charge is reached.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    Switch(
+                        checked = prefs.foregroundServiceEnabled,
+                        onCheckedChange = { enabled ->
+                            if (prefs.hapticsEnabled) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                val granted = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (!granted) {
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    return@Switch
+                                }
+                            }
+                            viewModel.setForegroundServiceEnabled(enabled)
                         }
-                        Switch(
-                            checked = prefs.alertsEnabled,
-                            onCheckedChange = { viewModel.setAlertsEnabled(it) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Sampling Interval (${prefs.samplingIntervalSeconds}s)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(2, 5, 10, 15, 30).forEach { seconds ->
+                        FilterChip(
+                            selected = prefs.samplingIntervalSeconds == seconds,
+                            onClick = { viewModel.updateSamplingInterval(seconds) },
+                            label = { Text("${seconds}s") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = semantic.mintSurface,
+                                selectedLabelColor = semantic.emeraldText
+                            )
                         )
                     }
                 }
@@ -81,23 +175,295 @@ fun SettingsScreen(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "Thresholds & Overrides", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = "Sampling Interval: ${prefs.samplingIntervalSeconds} seconds")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "High Temp Alert: ${prefs.highTempAlertCelsius ?: "--"} °C")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Target Charge Alarm: ${prefs.targetChargeAlertPercent ?: "--"}%")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Low Battery Alert: ${prefs.lowBatteryAlertPercent ?: "--"}%")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Design Capacity Override: ${prefs.userDesignCapacityMahOverride?.let { "$it mAh" } ?: "Auto (BatteryManager)"}"
+            TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Smart Charging & Thermal Alerts", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "Notify on custom target, rapid heating slope, high temperature, or low battery.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = prefs.alertsEnabled,
+                        onCheckedChange = { viewModel.setAlertsEnabled(it) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val targetPct = (prefs.targetChargeAlertPercent ?: 80).coerceIn(50, 100)
+                SettingSliderRow(
+                    label = "Target Charge Alarm",
+                    valueLabel = "$targetPct%",
+                    value = targetPct.toFloat(),
+                    range = 50f..100f,
+                    steps = 9,
+                    onValueChange = { viewModel.updateTargetChargeAlert(it.roundToInt()) }
+                )
+
+                val highTemp = (prefs.highTempAlertCelsius ?: 42.0f).coerceIn(36.0f, 48.0f)
+                SettingSliderRow(
+                    label = "High Temperature Threshold",
+                    valueLabel = String.format(Locale.US, "%.1f °C", highTemp),
+                    value = highTemp,
+                    range = 36f..48f,
+                    steps = 23,
+                    onValueChange = { viewModel.updateHighTempAlert((it * 2).roundToInt() / 2f) }
+                )
+
+                val slopeLimit = (prefs.thermalSlopeAlertCPerMin ?: 1.2f).coerceIn(0.5f, 2.5f)
+                SettingSliderRow(
+                    label = "Thermal Slope Alert",
+                    valueLabel = String.format(Locale.US, "+%.1f °C/min", slopeLimit),
+                    value = slopeLimit,
+                    range = 0.5f..2.5f,
+                    steps = 19,
+                    onValueChange = { viewModel.updateThermalSlopeAlert((it * 10).roundToInt() / 10f) }
+                )
+
+                val lowBattery = (prefs.lowBatteryAlertPercent ?: 20).coerceIn(10, 35)
+                SettingSliderRow(
+                    label = "Low Battery Warning",
+                    valueLabel = "$lowBattery%",
+                    value = lowBattery.toFloat(),
+                    range = 10f..35f,
+                    steps = 4,
+                    onValueChange = { viewModel.updateLowBatteryAlert(it.roundToInt()) }
+                )
+            }
+        }
+
+        item {
+            TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
+                Text(text = "Calibration & Speed Tiers", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Design Capacity: ${prefs.userDesignCapacityMahOverride?.let { String.format(Locale.US, "%.0f mAh (Manual)", it) } ?: "Auto (Device Profile)"}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedButton(onClick = { showCapacityDialog = true }) {
+                    Text("Set Design Capacity Override", color = semantic.emeraldText)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                val t = prefs.speedTierThresholds
+                Text(
+                    text = String.format(
+                        Locale.US,
+                        "Speed Thresholds: Normal ≥%.1fW • Fast ≥%.1fW • Very Fast ≥%.1fW",
+                        t.normalMinWatts,
+                        t.fastMinWatts,
+                        t.veryFastMinWatts
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedButton(onClick = { showSpeedTierDialog = true }) {
+                    Text("Configure Speed Wattage Tiers", color = semantic.emeraldText)
+                }
+            }
+        }
+
+        item {
+            TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
+                Text(text = "Appearance & Tactile Feedback", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppThemeMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = prefs.themeMode == mode,
+                            onClick = { viewModel.updateThemeMode(mode) },
+                            label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = semantic.mintSurface,
+                                selectedLabelColor = semantic.emeraldText
+                            )
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Material You Dynamic Color", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "Off by default to keep Emerald & Pure White contrast.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = prefs.useDynamicColor,
+                        onCheckedChange = { viewModel.setUseDynamicColor(it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Tactile Haptics", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "Subtle haptic clicks on cards and threshold controls.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = prefs.hapticsEnabled,
+                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SettingSliderRow(
+    label: String,
+    valueLabel: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValueChange: (Float) -> Unit
+) {
+    val semantic = LocalBatterySemanticColors.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = valueLabel,
+                style = MaterialTheme.typography.titleSmall,
+                color = semantic.emeraldText
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range,
+            steps = steps,
+            colors = SliderDefaults.colors(
+                thumbColor = semantic.emeraldStroke,
+                activeTrackColor = semantic.emeraldStroke
+            )
+        )
+    }
+}
+
+@Composable
+private fun DesignCapacityOverrideDialog(
+    currentOverride: Double?,
+    onDismiss: () -> Unit,
+    onSave: (Double?) -> Unit
+) {
+    var input by remember { mutableStateOf(currentOverride?.toInt()?.toString().orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Design Capacity Override (mAh)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Enter your phone's rated typical battery capacity (e.g., 5000). Leave empty to auto-detect.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it.filter(Char::isDigit) },
+                    label = { Text("Capacity (mAh)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onSave(null) }) {
+                Text("Use Auto")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val parsed = input.toDoubleOrNull()?.takeIf { it in 500.0..25_000.0 }
+                    onSave(parsed)
+                }
+            ) {
+                Text("Save", color = LocalBatterySemanticColors.current.emeraldText)
+            }
+        }
+    )
+}
+
+@Composable
+private fun SpeedThresholdsDialog(
+    current: SpeedTierThresholds,
+    onDismiss: () -> Unit,
+    onSave: (SpeedTierThresholds) -> Unit
+) {
+    var normalInput by remember { mutableStateOf(current.normalMinWatts.toString()) }
+    var fastInput by remember { mutableStateOf(current.fastMinWatts.toString()) }
+    var veryFastInput by remember { mutableStateOf(current.veryFastMinWatts.toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Battery-Side Speed Tiers (W)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = normalInput,
+                    onValueChange = { normalInput = it },
+                    label = { Text("Normal Min (W)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = fastInput,
+                    onValueChange = { fastInput = it },
+                    label = { Text("Fast Min (W)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = veryFastInput,
+                    onValueChange = { veryFastInput = it },
+                    label = { Text("Very Fast Min (W)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onSave(SpeedTierThresholds()) }) {
+                Text("Reset Defaults")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val n = normalInput.toDoubleOrNull() ?: current.normalMinWatts
+                    val f = fastInput.toDoubleOrNull() ?: current.fastMinWatts
+                    val vf = veryFastInput.toDoubleOrNull() ?: current.veryFastMinWatts
+                    onSave(SpeedTierThresholds(n, f, vf))
+                }
+            ) {
+                Text("Apply", color = LocalBatterySemanticColors.current.emeraldText)
+            }
+        }
+    )
 }

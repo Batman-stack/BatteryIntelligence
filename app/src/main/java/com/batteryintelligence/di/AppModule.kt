@@ -11,6 +11,8 @@ import com.batteryintelligence.data.datasource.BatteryHardwareDataSource
 import com.batteryintelligence.data.local.BatteryDatabase
 import com.batteryintelligence.data.local.dao.BatterySampleDao
 import com.batteryintelligence.data.local.dao.ChargingSessionDao
+import com.batteryintelligence.data.local.dao.ChargingSessionSampleDao
+import com.batteryintelligence.data.local.dao.DailyBatteryRollupDao
 import com.batteryintelligence.data.local.dao.OvernightLogDao
 import com.batteryintelligence.data.repository.AppUsageRepositoryImpl
 import com.batteryintelligence.data.repository.BatteryTelemetryRepositoryImpl
@@ -71,7 +73,6 @@ abstract class AppModule {
     ): OvernightLogRepository
 
     companion object {
-
         @Provides
         @JvmStatic
         @Singleton
@@ -82,7 +83,9 @@ abstract class AppModule {
                 context,
                 BatteryDatabase::class.java,
                 BatteryDatabase.DATABASE_NAME
-            ).build()
+            )
+                .addMigrations(BatteryDatabase.MIGRATION_1_2)
+                .build()
         }
 
         @Provides
@@ -95,6 +98,18 @@ abstract class AppModule {
         @JvmStatic
         fun provideChargingSessionDao(database: BatteryDatabase): ChargingSessionDao {
             return database.chargingSessionDao()
+        }
+
+        @Provides
+        @JvmStatic
+        fun provideChargingSessionSampleDao(database: BatteryDatabase): ChargingSessionSampleDao {
+            return database.chargingSessionSampleDao()
+        }
+
+        @Provides
+        @JvmStatic
+        fun provideDailyBatteryRollupDao(database: BatteryDatabase): DailyBatteryRollupDao {
+            return database.dailyBatteryRollupDao()
         }
 
         @Provides

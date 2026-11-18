@@ -1,15 +1,21 @@
 package com.batteryintelligence.widget
 
 import android.content.Context
-import android.content.Intent
+import androidx.glance.appwidget.updateAll
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 object BatteryWidgetUpdater {
-    const val ACTION_REFRESH_WIDGETS = "com.batteryintelligence.widget.ACTION_REFRESH_WIDGETS"
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun updateAllWidgets(context: Context) {
-        val intent = Intent(ACTION_REFRESH_WIDGETS).apply {
-            setPackage(context.packageName)
+        val appContext = context.applicationContext
+        scope.launch {
+            runCatching {
+                BatteryStatusGlanceWidget().updateAll(appContext)
+            }
         }
-        context.sendBroadcast(intent)
     }
 }

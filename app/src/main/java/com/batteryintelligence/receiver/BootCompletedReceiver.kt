@@ -1,8 +1,10 @@
 package com.batteryintelligence.receiver
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.work.WorkManager
 import com.batteryintelligence.domain.repository.PreferencesRepository
 import com.batteryintelligence.service.BatteryMonitorService
@@ -41,12 +43,20 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
                 val prefs = preferencesRepository.preferences.first()
                 if (prefs.foregroundServiceEnabled) {
-                    BatteryMonitorService.start(
-                        context = appContext,
-                        targetChargePercent = prefs.targetChargeAlertPercent ?: 80,
-                        highTempAlertCelsius = prefs.highTempAlertCelsius,
-                        alertsEnabled = prefs.alertsEnabled
-                    )
+                    try {
+                        BatteryMonitorService.start(
+                            context = appContext,
+                            targetChargePercent = prefs.targetChargeAlertPercent ?: 80,
+                            highTempAlertCelsius = prefs.highTempAlertCelsius,
+                            alertsEnabled = prefs.alertsEnabled
+                        )
+                    } catch (e: Exception) {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                            e !is ForegroundServiceStartNotAllowedException
+                        ) {
+                            // Ignore transient boot startup failures; WorkManager remains scheduled
+                        }
+                    }
                 }
 
                 BatteryWidgetUpdater.updateAllWidgets(appContext)

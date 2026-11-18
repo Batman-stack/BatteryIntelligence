@@ -2,22 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Runtime notification permission for Android 13+ alerts and foreground service status -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Foreground service permissions for continuous live battery telemetry -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-
-    <!-- Reschedule WorkManager telemetry tasks after device reboot -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- Protected AppOps permission for UsageStatsManager power attribution (granted via System Settings) -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- Package visibility to resolve installed launcher app names/icons for usage attribution -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -49,7 +41,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground service using specialUse type with required API 34+ subtype property -->
         <service
             android:name=".service.BatteryMonitorService"
             android:enabled="true"
@@ -60,7 +51,6 @@
                 android:value="Continuous battery telemetry sampling (voltage, current, temperature, charging status) and user-configured thermal or charge threshold alerting." />
         </service>
 
-        <!-- Boot & app-update receiver to re-initialize monitoring and periodic WorkManager jobs -->
         <receiver
             android:name=".receiver.BootCompletedReceiver"
             android:enabled="true"
@@ -71,7 +61,17 @@
             </intent-filter>
         </receiver>
 
-        <!-- Remove default WorkManagerInitializer so HiltWorkerFactory is wired via Configuration.Provider -->
+        <receiver
+            android:name=".widget.BatteryGlanceWidgetReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/battery_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -82,7 +82,5 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
-
     </application>
-
 </manifest>
