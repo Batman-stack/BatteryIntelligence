@@ -80,19 +80,18 @@ fun TelemetryLineChart(
         }
     }
 
-    val lines = buildList {
-        add(
-            LineCartesianLayer.rememberLine(
-                fill = LineCartesianLayer.LineFill.single(fill(lineColor)),
-                areaFill = LineCartesianLayer.AreaFill.single(fill(lineColor.copy(alpha = 0.14f)))
-            )
-        )
+    val primaryLine = LineCartesianLayer.rememberLine(
+        fill = LineCartesianLayer.LineFill.single(fill(lineColor)),
+        areaFill = LineCartesianLayer.AreaFill.single(fill(lineColor.copy(alpha = 0.14f)))
+    )
+    val secondaryLine = LineCartesianLayer.rememberLine(
+        fill = LineCartesianLayer.LineFill.single(fill(secondaryColor))
+    )
+    val lines = remember(secondaryYValues, xValues.size, primaryLine, secondaryLine) {
         if (secondaryYValues != null && secondaryYValues.size == xValues.size) {
-            add(
-                LineCartesianLayer.rememberLine(
-                    fill = LineCartesianLayer.LineFill.single(fill(secondaryColor))
-                )
-            )
+            listOf(primaryLine, secondaryLine)
+        } else {
+            listOf(primaryLine)
         }
     }
 
