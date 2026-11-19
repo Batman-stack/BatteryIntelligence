@@ -73,7 +73,7 @@ class AppBatteryAttributionCalculatorTest {
         assertNotNull(video.batteryAttribution.estimatedShareOfDrainPercent)
         assertNotNull(chat.batteryAttribution.estimatedShareOfDrainPercent)
         assertTrue(video.batteryAttribution.estimatedShareOfDrainPercent!! > chat.batteryAttribution.estimatedShareOfDrainPercent!!)
-        assertTrue(video.batteryAttribution.estimatedRangeLabel.contains("est."))
+        assertTrue(video.batteryAttribution.estimatedRangeLabel?.contains("est.") == true)
     }
 
     @Test
@@ -92,7 +92,7 @@ class AppBatteryAttributionCalculatorTest {
         assertEquals(BatteryAttributionState.ACTUAL, report.attributionState)
         val video = report.apps.first { it.packageName == "com.example.video" }
         assertEquals(12.5f, video.batteryAttribution.estimatedShareOfDrainPercent!!, 0.01f)
-        assertTrue(video.batteryAttribution.estimatedRangeLabel.contains("reported"))
+        assertTrue(video.batteryAttribution.estimatedRangeLabel?.contains("reported") == true)
     }
 
     @Test
