@@ -1,5 +1,6 @@
 package com.batteryintelligence.data.datasource
 
+import com.batteryintelligence.domain.model.ChargingStatus
 import kotlin.math.abs
 
 object BatteryMetricNormalizer {

@@ -3,6 +3,7 @@ package com.batteryintelligence.domain.intelligence
 import com.batteryintelligence.domain.model.BatteryHealthCondition
 import com.batteryintelligence.domain.model.BatterySnapshot
 import com.batteryintelligence.domain.model.ChargingConfidence
+import com.batteryintelligence.domain.model.ChargingEtaEstimate
 import com.batteryintelligence.domain.model.ChargingPhase
 import com.batteryintelligence.domain.model.ChargingSource
 import com.batteryintelligence.domain.model.ChargingStatus
@@ -113,7 +114,7 @@ class ChargingEtaPredictorTest {
         val warmPredictor = ChargingEtaPredictor()
 
         var coolEtaMs: Long? = null
-        var warmEta: com.batteryintelligence.domain.model.ChargingEtaEstimate? = null
+        var warmEta: ChargingEtaEstimate? = null
 
         for (i in 0..3) {
             val t = i * 30_000L

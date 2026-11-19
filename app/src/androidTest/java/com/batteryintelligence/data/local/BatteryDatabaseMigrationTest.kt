@@ -6,6 +6,8 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.batteryintelligence.data.local.entity.AppUsageSessionEntity
+import com.batteryintelligence.data.local.entity.ChargingSessionSampleEntity
 import com.batteryintelligence.domain.model.ChargingPhase
 import com.batteryintelligence.domain.model.ChargingSpeedTier
 import com.batteryintelligence.domain.model.ChargingTerminationReason
@@ -151,7 +153,7 @@ class BatteryDatabaseMigrationTest {
 
             // Verify V2 tables accept writes cleanly
             val sampleId = db.chargingSessionSampleDao().insertSample(
-                com.batteryintelligence.data.local.entity.ChargingSessionSampleEntity(
+                ChargingSessionSampleEntity(
                     sessionId = 1L,
                     timestampMs = 5_000L,
                     elapsedMs = 4_000L,
@@ -172,7 +174,7 @@ class BatteryDatabaseMigrationTest {
             // Verify V3 app_usage_sessions table accepts writes and queries cleanly
             db.appUsageSessionDao().insertSessions(
                 listOf(
-                    com.batteryintelligence.data.local.entity.AppUsageSessionEntity(
+                    AppUsageSessionEntity(
                         packageName = "com.example.reader",
                         appName = "Reader",
                         startTimeMs = 10_000L,
