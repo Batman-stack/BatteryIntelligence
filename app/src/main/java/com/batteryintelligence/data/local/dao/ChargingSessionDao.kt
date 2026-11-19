@@ -70,6 +70,9 @@ interface ChargingSessionDao {
     )
     suspend fun closeOtherActiveSessions(excludeId: Long)
 
+    @Query("SELECT * FROM charging_sessions WHERE is_active = 0 ORDER BY start_time_ms DESC LIMIT :limit")
+    suspend fun getCompletedSessions(limit: Int = 200): List<ChargingSessionEntity>
+
     @Query("DELETE FROM charging_sessions WHERE is_active = 0 AND start_time_ms < :cutoffTimestampMs")
     suspend fun deleteOlderThan(cutoffTimestampMs: Long): Int
 }

@@ -175,6 +175,16 @@ fun BatteryIntelligenceScaffold(
         }
     ) { innerPadding ->
         val screenModifier = Modifier.padding(innerPadding)
+        val navigateTopLevel: (Any) -> Unit = { route ->
+            navController.navigate(route) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+
         NavHost(
             navController = navController,
             startDestination = HomeRoute,
@@ -182,7 +192,10 @@ fun BatteryIntelligenceScaffold(
         ) {
             composable<HomeRoute> {
                 HomeDashboardScreen(
-                    onOpenDisclosure = { showPowerDisclosure = true }
+                    onOpenDisclosure = { showPowerDisclosure = true },
+                    onNavigateToCharging = { navigateTopLevel(ChargingRoute) },
+                    onNavigateToAnalytics = { navigateTopLevel(AnalyticsRoute) },
+                    onNavigateToHealth = { navigateTopLevel(HealthRoute) }
                 )
             }
             composable<ChargingRoute> {
@@ -203,15 +216,7 @@ fun BatteryIntelligenceScaffold(
             }
             composable<HealthRoute> {
                 BatteryHealthScreen(
-                    onNavigateToSettings = {
-                        navController.navigate(SettingsRoute) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
+                    onNavigateToSettings = { navigateTopLevel(SettingsRoute) }
                 )
             }
             composable<SettingsRoute> {

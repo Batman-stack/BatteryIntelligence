@@ -102,6 +102,11 @@ data class BatteryHealthReport(
     val stateOfHealthSource: MetricSource,
     val cycleCount: Int?,
     val cycleCountSource: MetricSource,
+    val estimatedCycleCount: Double? = null,
+    val cycleCountConfidence: ChargingConfidence = ChargingConfidence.LOW,
+    val averageChargingTempCelsius: Float? = null,
+    val maxObservedTempCelsius: Float? = null,
+    val highTempSessionCount: Int = 0,
     val evaluatedSessionsCount: Int
 )
 
@@ -124,6 +129,7 @@ data class MonitoringPreferences(
     val samplingIntervalSeconds: Int = 5,
     val foregroundServiceEnabled: Boolean = false,
     val alertsEnabled: Boolean = true,
+    val disconnectAlertEnabled: Boolean = false,
     val highTempAlertCelsius: Float? = 42.0f,
     val thermalSlopeAlertCPerMin: Float? = 1.2f,
     val targetChargeAlertPercent: Int? = 80,
@@ -131,6 +137,8 @@ data class MonitoringPreferences(
     val userDesignCapacityMahOverride: Double? = null,
     val speedTierThresholds: SpeedTierThresholds = SpeedTierThresholds(),
     val themeMode: AppThemeMode = AppThemeMode.LIGHT,
+    val temperatureUnit: TemperatureUnit = TemperatureUnit.CELSIUS,
+    val capacityUnit: CapacityUnit = CapacityUnit.MAH,
     val useDynamicColor: Boolean = false,
     val hapticsEnabled: Boolean = true
 )

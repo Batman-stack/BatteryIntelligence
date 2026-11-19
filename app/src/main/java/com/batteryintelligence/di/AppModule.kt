@@ -9,6 +9,7 @@ import androidx.room.Room
 import com.batteryintelligence.data.datasource.AndroidBatteryDataSource
 import com.batteryintelligence.data.datasource.BatteryHardwareDataSource
 import com.batteryintelligence.data.local.BatteryDatabase
+import com.batteryintelligence.data.local.dao.AppUsageSessionDao
 import com.batteryintelligence.data.local.dao.BatterySampleDao
 import com.batteryintelligence.data.local.dao.ChargingSessionDao
 import com.batteryintelligence.data.local.dao.ChargingSessionSampleDao
@@ -17,11 +18,13 @@ import com.batteryintelligence.data.local.dao.OvernightLogDao
 import com.batteryintelligence.data.repository.AppUsageRepositoryImpl
 import com.batteryintelligence.data.repository.BatteryTelemetryRepositoryImpl
 import com.batteryintelligence.data.repository.ChargingSessionRepositoryImpl
+import com.batteryintelligence.data.repository.DeviceIntelligenceRepositoryImpl
 import com.batteryintelligence.data.repository.OvernightLogRepositoryImpl
 import com.batteryintelligence.data.repository.PreferencesRepositoryImpl
 import com.batteryintelligence.domain.repository.AppUsageRepository
 import com.batteryintelligence.domain.repository.BatteryTelemetryRepository
 import com.batteryintelligence.domain.repository.ChargingSessionRepository
+import com.batteryintelligence.domain.repository.DeviceIntelligenceRepository
 import com.batteryintelligence.domain.repository.OvernightLogRepository
 import com.batteryintelligence.domain.repository.PreferencesRepository
 import dagger.Binds
@@ -72,6 +75,12 @@ abstract class AppModule {
         impl: OvernightLogRepositoryImpl
     ): OvernightLogRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindDeviceIntelligenceRepository(
+        impl: DeviceIntelligenceRepositoryImpl
+    ): DeviceIntelligenceRepository
+
     companion object {
         @Provides
         @JvmStatic
@@ -84,7 +93,10 @@ abstract class AppModule {
                 BatteryDatabase::class.java,
                 BatteryDatabase.DATABASE_NAME
             )
-                .addMigrations(BatteryDatabase.MIGRATION_1_2)
+                .addMigrations(
+                    BatteryDatabase.MIGRATION_1_2,
+                    BatteryDatabase.MIGRATION_2_3
+                )
                 .build()
         }
 
@@ -116,6 +128,12 @@ abstract class AppModule {
         @JvmStatic
         fun provideOvernightLogDao(database: BatteryDatabase): OvernightLogDao {
             return database.overnightLogDao()
+        }
+
+        @Provides
+        @JvmStatic
+        fun provideAppUsageSessionDao(database: BatteryDatabase): AppUsageSessionDao {
+            return database.appUsageSessionDao()
         }
 
         @Provides

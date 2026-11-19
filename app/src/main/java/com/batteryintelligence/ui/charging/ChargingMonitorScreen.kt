@@ -2,6 +2,8 @@ package com.batteryintelligence.ui.charging
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +36,7 @@ import com.batteryintelligence.ui.components.MetricTile
 import com.batteryintelligence.ui.components.StatusPill
 import com.batteryintelligence.ui.components.TactileCard
 import com.batteryintelligence.ui.components.TelemetryLineChart
+import com.batteryintelligence.ui.components.UnitFormatters
 import com.batteryintelligence.ui.theme.LocalBatterySemanticColors
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import java.text.DateFormat
@@ -48,6 +51,7 @@ private enum class SessionCurveMode(val label: String, val unit: String) {
     TEMP("Temp (°C)", "°C")
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChargingMonitorScreen(
     onSessionClick: (Long) -> Unit = {},
@@ -140,12 +144,12 @@ fun ChargingMonitorScreen(
                             Text(
                                 text = liveIntelligence.smoothedPowerWatts?.let {
                                     String.format(Locale.US, "%.1f W", it)
-                                } ?: "-- W",
+                                } ?: "Not Available",
                                 style = MaterialTheme.typography.displayMedium,
                                 color = semantic.emeraldText
                             )
                             Text(
-                                text = "Phase: ${liveIntelligence.chargingPhase.displayLabel}",
+                                text = "Heuristic speed tier • Phase: ${liveIntelligence.chargingPhase.displayLabel}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -153,6 +157,19 @@ fun ChargingMonitorScreen(
                         if (eta != null) {
                             EtaConfidenceBadge(confidence = eta.confidence)
                         }
+                    }
+
+                    if (liveIntelligence.isStallOrTrickleDetected || eta?.isThermalThrottlingAdjusted == true) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        StatusPill(
+                            text = if (liveIntelligence.isStallOrTrickleDetected) {
+                                "Trickle / Stall Detected — Check Cable or Load"
+                            } else {
+                                "ETA Adjusted for Elevated Temperature"
+                            },
+                            textColor = semantic.warmText,
+                            containerColor = semantic.warmContainer
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -163,7 +180,7 @@ fun ChargingMonitorScreen(
                         eta.isSlowTrickleClamped -> "Very slow / trickle"
                         eta.timeToTargetMs == 0L -> "Target $targetPercent% reached"
                         eta.timeToTargetMs != null -> formatEtaDuration(eta.timeToTargetMs)
-                        else -> "Unavailable"
+                        else -> "Not Available"
                     }
                     val fullEtaLabel = when {
                         eta == null || eta.confidence == ChargingConfidence.CALCULATING -> "Calculating..."
@@ -173,7 +190,7 @@ fun ChargingMonitorScreen(
                             val clock = eta.clockTimeAt100Ms?.let { " (${timeFormat.format(Date(it))})" }.orEmpty()
                             "${formatEtaDuration(eta.timeTo100Ms)}$clock"
                         }
-                        else -> "--"
+                        else -> "Not Available"
                     }
 
                     Row(
@@ -206,7 +223,7 @@ fun ChargingMonitorScreen(
                             label = "Smoothed Current",
                             value = liveIntelligence.smoothedCurrentMa?.let {
                                 String.format(Locale.US, "%.0f mA", abs(it))
-                            } ?: "-- mA",
+                            } ?: "Not Available",
                             subtitle = activeSession?.let { "${it.startLevelPercent}% → ${snapshot.levelPercent ?: it.startLevelPercent}%" },
                             modifier = Modifier.weight(1f),
                             containerColor = MaterialTheme.colorScheme.background
@@ -216,7 +233,7 @@ fun ChargingMonitorScreen(
                             value = liveIntelligence.thermalSlopeCPerMin?.let {
                                 String.format(Locale.US, "%+.2f °C/m", it)
                             } ?: "-- °C/m",
-                            subtitle = snapshot.temperatureCelsius?.let { String.format(Locale.US, "Now %.1f °C", it) },
+                            subtitle = "Now ${UnitFormatters.formatTemperature(snapshot.temperatureCelsius, prefs.temperatureUnit)}",
                             modifier = Modifier.weight(1f),
                             containerColor = MaterialTheme.colorScheme.background,
                             valueColor = when {
@@ -225,6 +242,31 @@ fun ChargingMonitorScreen(
                                 else -> MaterialTheme.colorScheme.onSurface
                             }
                         )
+                    }
+
+                    // Rolling ETA Prediction History
+                    val history = eta?.predictionHistory.orEmpty()
+                    if (history.size >= 2) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Recent ETA Updates",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            history.takeLast(4).forEach { pt ->
+                                val label = "${pt.levelPercent}%: ${pt.estimatedTimeTo100Ms?.let(::formatEtaDuration) ?: "--"}"
+                                StatusPill(
+                                    text = label,
+                                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    containerColor = MaterialTheme.colorScheme.background
+                                )
+                            }
+                        }
                     }
                 } else {
                     Text(

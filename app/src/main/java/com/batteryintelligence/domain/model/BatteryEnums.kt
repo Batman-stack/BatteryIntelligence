@@ -110,3 +110,27 @@ enum class AppThemeMode(val displayLabel: String) {
     DARK("Dark"),
     SYSTEM("Follow System")
 }
+
+enum class TemperatureUnit(val symbol: String) {
+    CELSIUS("°C"),
+    FAHRENHEIT("°F")
+}
+
+enum class CapacityUnit(val symbol: String) {
+    MAH("mAh"),
+    AH("Ah")
+}
+
+enum class AppUsageSortMode(val displayLabel: String) {
+    MOST_USED("Most Used"),
+    LEAST_USED("Least Used"),
+    MOST_FREQUENTLY_OPENED("Most Opened"),
+    RECENTLY_OPENED("Recently Opened"),
+    HIGHEST_ESTIMATED_BATTERY("Est. Battery")
+}
+
+enum class BatteryAttributionState(val displayLabel: String) {
+    ACTUAL("Actual"),
+    ESTIMATED("Estimated"),
+    UNAVAILABLE("Not Available")
+}

@@ -136,9 +136,9 @@ class BatteryDatabaseMigrationTest {
             helper.writableDatabase.close()
         }
 
-        // 2. Open with Room V2 + MIGRATION_1_2 (Room verifies full V2 schema on open)
+        // 2. Open with Room V3 + MIGRATION_1_2 + MIGRATION_2_3 (Room verifies full V3 schema on open)
         val db = Room.databaseBuilder(context, BatteryDatabase::class.java, testDbName)
-            .addMigrations(BatteryDatabase.MIGRATION_1_2)
+            .addMigrations(BatteryDatabase.MIGRATION_1_2, BatteryDatabase.MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
 
@@ -149,7 +149,7 @@ class BatteryDatabaseMigrationTest {
             assertEquals(32.0f, migrated.avgTemperatureCelsius!!, 0.01f)
             assertEquals(ChargingTerminationReason.USER_UNPLUGGED, migrated.terminationReason)
 
-            // Verify new V2 tables accept writes cleanly
+            // Verify V2 tables accept writes cleanly
             val sampleId = db.chargingSessionSampleDao().insertSample(
                 com.batteryintelligence.data.local.entity.ChargingSessionSampleEntity(
                     sessionId = 1L,
@@ -168,6 +168,24 @@ class BatteryDatabaseMigrationTest {
                 )
             )
             assertEquals(1L, sampleId)
+
+            // Verify V3 app_usage_sessions table accepts writes and queries cleanly
+            db.appUsageSessionDao().insertSessions(
+                listOf(
+                    com.batteryintelligence.data.local.entity.AppUsageSessionEntity(
+                        packageName = "com.example.reader",
+                        appName = "Reader",
+                        startTimeMs = 10_000L,
+                        endTimeMs = 70_000L,
+                        durationMs = 60_000L,
+                        closeReason = "Backgrounded",
+                        recordedAtMs = 75_000L
+                    )
+                )
+            )
+            val cached = db.appUsageSessionDao().getSessionsInWindow(0L, 100_000L)
+            assertEquals(1, cached.size)
+            assertEquals("com.example.reader", cached.first().packageName)
         } finally {
             db.close()
         }

@@ -201,6 +201,9 @@ class ChargingSessionManagerTest {
         override fun observeCompletedSessions(limit: Int): Flow<List<ChargingSessionEntity>> =
             items.map { list -> list.filter { !it.isActive }.sortedByDescending { it.startTimeMs }.take(limit) }
 
+        override suspend fun getCompletedSessions(limit: Int): List<ChargingSessionEntity> =
+            items.value.filter { !it.isActive }.sortedByDescending { it.startTimeMs }.take(limit)
+
         override suspend fun getSessionsInWindow(startMs: Long, endMs: Long): List<ChargingSessionEntity> =
             items.value.filter { it.startTimeMs in startMs..endMs }.sortedBy { it.startTimeMs }
 

@@ -107,10 +107,46 @@ class ChargingEtaPredictorTest {
         assertEquals(ChargingPhase.CV, cvPhase)
     }
 
+    @Test
+    fun `elevated battery temperature and heating slope apply thermal throttling factor and record ETA history`() {
+        val coolPredictor = ChargingEtaPredictor()
+        val warmPredictor = ChargingEtaPredictor()
+
+        var coolEtaMs: Long? = null
+        var warmEta: com.batteryintelligence.domain.model.ChargingEtaEstimate? = null
+
+        for (i in 0..3) {
+            val t = i * 30_000L
+            val soc = 50f + i * 0.5f
+            coolEtaMs = coolPredictor.update(
+                snapshot = snapshotAt(t, soc, 3000.0, tempC = 32.0f),
+                smoothedCurrentMa = 3000.0,
+                effectiveCapacityMah = 5000.0,
+                targetPercent = 80,
+                thermalSlopeCPerMin = 0.2f
+            ).first?.timeTo100Ms
+
+            warmEta = warmPredictor.update(
+                snapshot = snapshotAt(t, soc, 3000.0, tempC = 44.5f),
+                smoothedCurrentMa = 3000.0,
+                effectiveCapacityMah = 5000.0,
+                targetPercent = 80,
+                thermalSlopeCPerMin = 1.4f
+            ).first
+        }
+
+        assertNotNull(coolEtaMs)
+        assertNotNull(warmEta?.timeTo100Ms)
+        assertTrue(warmEta!!.isThermalThrottlingAdjusted)
+        assertTrue("Expected thermal throttling to extend ETA", warmEta.timeTo100Ms!! > coolEtaMs!!)
+        assertTrue("Expected prediction history to record points", warmEta.predictionHistory.isNotEmpty())
+    }
+
     private fun snapshotAt(
         timestampMs: Long,
         levelPrecise: Float,
-        currentMa: Double?
+        currentMa: Double?,
+        tempC: Float = 32.0f
     ): BatterySnapshot {
         return BatterySnapshot(
             timestampMs = timestampMs,
@@ -122,7 +158,7 @@ class ChargingEtaPredictorTest {
             isBatteryPresent = true,
             isBatteryLow = false,
             technology = "Li-ion",
-            temperatureCelsius = 32.0f,
+            temperatureCelsius = tempC,
             voltageMv = 4350,
             currentNowMa = currentMa,
             currentAverageMa = currentMa,

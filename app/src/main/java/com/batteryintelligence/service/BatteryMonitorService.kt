@@ -34,7 +34,8 @@ data class SmartAlarmConfig(
     val highTempAlertCelsius: Float? = 42.0f,
     val thermalSlopeAlertCPerMin: Float? = 1.2f,
     val lowBatteryAlertPercent: Int? = 20,
-    val alertsEnabled: Boolean = true
+    val alertsEnabled: Boolean = true,
+    val disconnectAlertEnabled: Boolean = false
 )
 
 @AndroidEntryPoint
@@ -59,6 +60,7 @@ class BatteryMonitorService : LifecycleService() {
     private var highTempAlarmFired = false
     private var thermalSlopeAlarmFired = false
     private var lowBatteryAlarmFired = false
+    private var wasPluggedIn = false
 
     private var lastPersistedTimestampMs = 0L
     private var lastPersistedLevel: Int? = null
@@ -136,7 +138,8 @@ class BatteryMonitorService : LifecycleService() {
                     highTempAlertCelsius = prefs.highTempAlertCelsius,
                     thermalSlopeAlertCPerMin = prefs.thermalSlopeAlertCPerMin,
                     lowBatteryAlertPercent = prefs.lowBatteryAlertPercent,
-                    alertsEnabled = prefs.alertsEnabled
+                    alertsEnabled = prefs.alertsEnabled,
+                    disconnectAlertEnabled = prefs.disconnectAlertEnabled
                 )
                 val desiredIntervalMs = computeDesiredIntervalMs(prefs, latestSnapshot)
                 if (desiredIntervalMs != activeSamplingIntervalMs) {
@@ -297,6 +300,18 @@ class BatteryMonitorService : LifecycleService() {
 
         val level = snapshot.levelPercent
         val target = alarmConfig.targetChargePercent
+
+        if (wasPluggedIn && !isPlugged &&
+            alarmConfig.alertsEnabled &&
+            alarmConfig.disconnectAlertEnabled &&
+            (level == null || level < target)
+        ) {
+            notificationHelper.showChargerDisconnectedAlert(
+                currentLevelPercent = level,
+                targetChargePercent = target
+            )
+        }
+        wasPluggedIn = isPlugged
 
         if (!isPlugged) {
             targetAlarmFiredForCurrentCharge = false

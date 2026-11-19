@@ -414,10 +414,6 @@ class AndroidBatteryDataSource @Inject constructor(
     }
 
     private fun lookupDesignCapacity(): Pair<Double?, MetricSource> {
-        readDesignCapacityFromPowerProfile()?.let { mah ->
-            return mah to MetricSource.POWER_PROFILE
-        }
-
         val sysfsDesignMah = readSysfsLong(SYSFS_CHARGE_FULL_DESIGN_PATHS)
             ?.let(BatteryMetricNormalizer::normalizeCapacityToMah)
         if (sysfsDesignMah != null) {
@@ -425,24 +421,6 @@ class AndroidBatteryDataSource @Inject constructor(
         }
 
         return null to MetricSource.UNAVAILABLE
-    }
-
-    private fun readDesignCapacityFromPowerProfile(): Double? {
-        return runCatching {
-            val powerProfileClass = Class.forName("com.android.internal.os.PowerProfile")
-            val constructor = powerProfileClass.getConstructor(Context::class.java)
-            val powerProfile = constructor.newInstance(context)
-
-            val rawCapacity = runCatching {
-                val method = powerProfileClass.getMethod("getBatteryCapacity")
-                (method.invoke(powerProfile) as? Number)?.toDouble()
-            }.getOrNull() ?: runCatching {
-                val method = powerProfileClass.getMethod("getAveragePower", String::class.java)
-                (method.invoke(powerProfile, "battery.capacity") as? Number)?.toDouble()
-            }.getOrNull()
-
-            rawCapacity?.takeIf { it.isFinite() && it > 100.0 }
-        }.getOrNull()
     }
 
     private fun readIntPropertySafely(propertyId: Int): Int? {

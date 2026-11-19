@@ -1,6 +1,5 @@
 package com.batteryintelligence.data.datasource
 
-import com.batteryintelligence.domain.model.ChargingStatus
 import kotlin.math.abs
 
 object BatteryMetricNormalizer {
@@ -51,7 +50,11 @@ object BatteryMetricNormalizer {
         if (rawValue == Int.MIN_VALUE || rawValue <= 0) {
             return null
         }
-        val normalized = if (rawValue > 100_000) rawValue / 1000 else rawValue
+        val normalized = when {
+            rawValue > 100_000 -> rawValue / 1000
+            rawValue in 1..25 -> rawValue * 1000
+            else -> rawValue
+        }
         return normalized.takeIf { it in 1_000..25_000 }
     }
 

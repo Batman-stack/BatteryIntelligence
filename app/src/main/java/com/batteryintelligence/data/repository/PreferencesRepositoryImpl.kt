@@ -10,8 +10,10 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.batteryintelligence.domain.model.AppThemeMode
+import com.batteryintelligence.domain.model.CapacityUnit
 import com.batteryintelligence.domain.model.MonitoringPreferences
 import com.batteryintelligence.domain.model.SpeedTierThresholds
+import com.batteryintelligence.domain.model.TemperatureUnit
 import com.batteryintelligence.domain.repository.PreferencesRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -29,6 +31,7 @@ class PreferencesRepositoryImpl @Inject constructor(
         val SAMPLING_INTERVAL_SECONDS = intPreferencesKey("sampling_interval_seconds")
         val FOREGROUND_SERVICE_ENABLED = booleanPreferencesKey("foreground_service_enabled")
         val ALERTS_ENABLED = booleanPreferencesKey("alerts_enabled")
+        val DISCONNECT_ALERT_ENABLED = booleanPreferencesKey("disconnect_alert_enabled")
         val HIGH_TEMP_ALERT_CELSIUS = floatPreferencesKey("high_temp_alert_celsius")
         val THERMAL_SLOPE_ALERT_C_PER_MIN = floatPreferencesKey("thermal_slope_alert_c_per_min")
         val TARGET_CHARGE_ALERT_PERCENT = intPreferencesKey("target_charge_alert_percent")
@@ -38,6 +41,8 @@ class PreferencesRepositoryImpl @Inject constructor(
         val FAST_MIN_WATTS = doublePreferencesKey("speed_fast_min_watts")
         val VERY_FAST_MIN_WATTS = doublePreferencesKey("speed_very_fast_min_watts")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val TEMPERATURE_UNIT = stringPreferencesKey("temperature_unit")
+        val CAPACITY_UNIT = stringPreferencesKey("capacity_unit")
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
     }
@@ -55,6 +60,14 @@ class PreferencesRepositoryImpl @Inject constructor(
                 runCatching { AppThemeMode.valueOf(raw) }.getOrDefault(AppThemeMode.LIGHT)
             } ?: AppThemeMode.LIGHT
 
+            val tempUnit = prefs[PreferencesKeys.TEMPERATURE_UNIT]?.let { raw ->
+                runCatching { TemperatureUnit.valueOf(raw) }.getOrDefault(TemperatureUnit.CELSIUS)
+            } ?: TemperatureUnit.CELSIUS
+
+            val capUnit = prefs[PreferencesKeys.CAPACITY_UNIT]?.let { raw ->
+                runCatching { CapacityUnit.valueOf(raw) }.getOrDefault(CapacityUnit.MAH)
+            } ?: CapacityUnit.MAH
+
             val normalMin = prefs[PreferencesKeys.NORMAL_MIN_WATTS] ?: 7.5
             val fastMin = prefs[PreferencesKeys.FAST_MIN_WATTS] ?: 18.0
             val veryFastMin = prefs[PreferencesKeys.VERY_FAST_MIN_WATTS] ?: 35.0
@@ -63,6 +76,7 @@ class PreferencesRepositoryImpl @Inject constructor(
                 samplingIntervalSeconds = (prefs[PreferencesKeys.SAMPLING_INTERVAL_SECONDS] ?: 5).coerceIn(2, 30),
                 foregroundServiceEnabled = prefs[PreferencesKeys.FOREGROUND_SERVICE_ENABLED] ?: false,
                 alertsEnabled = prefs[PreferencesKeys.ALERTS_ENABLED] ?: true,
+                disconnectAlertEnabled = prefs[PreferencesKeys.DISCONNECT_ALERT_ENABLED] ?: false,
                 highTempAlertCelsius = prefs[PreferencesKeys.HIGH_TEMP_ALERT_CELSIUS] ?: 42.0f,
                 thermalSlopeAlertCPerMin = prefs[PreferencesKeys.THERMAL_SLOPE_ALERT_C_PER_MIN] ?: 1.2f,
                 targetChargeAlertPercent = (prefs[PreferencesKeys.TARGET_CHARGE_ALERT_PERCENT] ?: 80).coerceIn(50, 100),
@@ -74,6 +88,8 @@ class PreferencesRepositoryImpl @Inject constructor(
                     veryFastMinWatts = veryFastMin.coerceAtLeast(fastMin + 4.0)
                 ),
                 themeMode = themeMode,
+                temperatureUnit = tempUnit,
+                capacityUnit = capUnit,
                 useDynamicColor = prefs[PreferencesKeys.USE_DYNAMIC_COLOR] ?: false,
                 hapticsEnabled = prefs[PreferencesKeys.HAPTICS_ENABLED] ?: true
             )
@@ -89,6 +105,10 @@ class PreferencesRepositoryImpl @Inject constructor(
 
     override suspend fun setAlertsEnabled(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.ALERTS_ENABLED] = enabled }
+    }
+
+    override suspend fun setDisconnectAlertEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.DISCONNECT_ALERT_ENABLED] = enabled }
     }
 
     override suspend fun updateHighTempAlert(celsius: Float?) {
@@ -154,6 +174,14 @@ class PreferencesRepositoryImpl @Inject constructor(
 
     override suspend fun updateThemeMode(themeMode: AppThemeMode) {
         dataStore.edit { it[PreferencesKeys.THEME_MODE] = themeMode.name }
+    }
+
+    override suspend fun updateTemperatureUnit(unit: TemperatureUnit) {
+        dataStore.edit { it[PreferencesKeys.TEMPERATURE_UNIT] = unit.name }
+    }
+
+    override suspend fun updateCapacityUnit(unit: CapacityUnit) {
+        dataStore.edit { it[PreferencesKeys.CAPACITY_UNIT] = unit.name }
     }
 
     override suspend fun setUseDynamicColor(enabled: Boolean) {

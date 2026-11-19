@@ -1,11 +1,7 @@
 package com.batteryintelligence.ui.dashboard
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +17,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,13 +27,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.batteryintelligence.ui.components.BatteryHeroRing
 import com.batteryintelligence.ui.components.BatterySideDisclosureBanner
 import com.batteryintelligence.ui.components.ChargingSpeedBadge
 import com.batteryintelligence.ui.components.MetricTile
 import com.batteryintelligence.ui.components.StatusPill
 import com.batteryintelligence.ui.components.TactileCard
+import com.batteryintelligence.ui.components.TactilePillButton
 import com.batteryintelligence.ui.components.TelemetryLineChart
+import com.batteryintelligence.ui.components.UnitFormatters
 import com.batteryintelligence.ui.theme.LocalBatterySemanticColors
 import com.batteryintelligence.ui.theme.LocalReducedMotion
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
@@ -54,6 +57,9 @@ private enum class HomeChartMetric(val label: String, val unit: String) {
 @Composable
 fun HomeDashboardScreen(
     onOpenDisclosure: () -> Unit = {},
+    onNavigateToCharging: () -> Unit = {},
+    onNavigateToAnalytics: () -> Unit = {},
+    onNavigateToHealth: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: HomeDashboardViewModel = hiltViewModel()
 ) {
@@ -61,8 +67,22 @@ fun HomeDashboardScreen(
     val samples by viewModel.recentSamples.collectAsStateWithLifecycle()
     val selectedWindow by viewModel.selectedWindow.collectAsStateWithLifecycle()
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val deviceSnapshot by viewModel.deviceSnapshot.collectAsStateWithLifecycle()
+    val top24hApps by viewModel.top24hApps.collectAsStateWithLifecycle()
+    val hasUsagePermission by viewModel.hasUsagePermission.collectAsStateWithLifecycle()
 
     var selectedMetric by remember { mutableStateOf(HomeChartMetric.POWER) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshDashboardIntelligence()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val snapshot = liveState.snapshot
     val semantic = LocalBatterySemanticColors.current
@@ -115,6 +135,7 @@ fun HomeDashboardScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // 1. Tactile Hero Battery Ring & Live Status Card
         item {
             TactileCard(
                 containerColor = if (isCharging) semantic.mintSurface else MaterialTheme.colorScheme.surface,
@@ -127,69 +148,82 @@ fun HomeDashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isCharging) "Charging via ${snapshot?.chargingSource?.displayLabel ?: "Plugged"}" else "On Battery",
+                        text = if (isCharging) "Charging • ${snapshot?.chargingSource?.displayLabel ?: "Plugged"}" else "On Battery",
                         style = MaterialTheme.typography.titleMedium,
                         color = if (isCharging) semantic.emeraldText else MaterialTheme.colorScheme.onSurface
                     )
                     ChargingSpeedBadge(tier = liveState.speedTier)
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AnimatedContent(
-                        targetState = snapshot?.levelPercent,
-                        transitionSpec = {
-                            if (reducedMotion) {
-                                fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                            } else {
-                                fadeIn(tween(180)) togetherWith fadeOut(tween(180))
-                            }
-                        },
-                        label = "socAnim"
-                    ) { level ->
-                        Text(
-                            text = level?.let { "$it%" } ?: "--%",
-                            style = MaterialTheme.typography.displayLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    BatteryHeroRing(
+                        levelPercent = snapshot?.levelPercent,
+                        isCharging = isCharging
+                    )
 
-                    Column(horizontalAlignment = Alignment.End) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         StatusPill(
-                            text = if (prefs.foregroundServiceEnabled) "FGS Active" else "In-App Live",
+                            text = if (prefs.foregroundServiceEnabled) "Background Monitor Active" else "In-App Live Sampling",
                             textColor = if (prefs.foregroundServiceEnabled) semantic.emeraldText else MaterialTheme.colorScheme.onSurfaceVariant,
                             containerColor = if (prefs.foregroundServiceEnabled) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surfaceVariant
                         )
+
                         liveState.etaEstimate?.timeToTargetMs?.takeIf { isCharging && it > 0L }?.let { etaMs ->
-                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "${formatEtaShort(etaMs)} to ${liveState.etaEstimate?.targetPercent ?: 80}%",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "${UnitFormatters.formatDurationCompact(etaMs)} to ${liveState.etaEstimate?.targetPercent ?: 80}%",
+                                style = MaterialTheme.typography.titleSmall,
                                 color = semantic.emeraldText
                             )
-                        }
+                        } ?: Text(
+                            text = if (isCharging) "Phase: ${liveState.chargingPhase.displayLabel}" else "Target Alarm: ${prefs.targetChargeAlertPercent ?: 80}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Text(
+                            text = "Battery Temp: ${UnitFormatters.formatTemperature(snapshot?.temperatureCelsius, prefs.temperatureUnit)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                LinearProgressIndicator(
-                    progress = { ((snapshot?.levelPercent ?: 0) / 100f).coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp),
-                    color = semantic.emeraldStroke,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    strokeCap = StrokeCap.Round
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TactilePillButton(
+                        text = "Charging",
+                        onClick = onNavigateToCharging,
+                        emphasized = isCharging,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TactilePillButton(
+                        text = "24h Apps",
+                        onClick = onNavigateToAnalytics,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TactilePillButton(
+                        text = "Diagnostics",
+                        onClick = onNavigateToHealth,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
+        // 2. Live Power, Current, Voltage, Temp Tiles
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -231,7 +265,7 @@ fun HomeDashboardScreen(
                 )
                 MetricTile(
                     label = "Temperature",
-                    value = tempC?.let { String.format(Locale.US, "%.1f °C", it) } ?: "-- °C",
+                    value = UnitFormatters.formatTemperature(tempC, prefs.temperatureUnit),
                     subtitle = slope?.let { String.format(Locale.US, "Slope %+.2f °C/min", it) } ?: "Stabilizing slope",
                     modifier = Modifier.weight(1f),
                     valueColor = tempValueColor
@@ -243,6 +277,139 @@ fun HomeDashboardScreen(
             BatterySideDisclosureBanner(onOpenDetails = onOpenDisclosure)
         }
 
+        // 3. Quick Device Intelligence Summary Card
+        deviceSnapshot?.let { dev ->
+            item {
+                TactileCard(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    onClick = onNavigateToHealth
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Device Intelligence",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        StatusPill(
+                            text = dev.thermalSensors.thermalSeverity.displayLabel,
+                            textColor = semantic.emeraldText,
+                            containerColor = semantic.mintSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        MetricTile(
+                            label = "RAM Used",
+                            value = String.format(Locale.US, "%.0f%%", dev.memoryStorage.ramUsagePercent),
+                            subtitle = "${UnitFormatters.formatBytesGb(dev.memoryStorage.availableRamBytes)} free",
+                            modifier = Modifier.weight(1f)
+                        )
+                        MetricTile(
+                            label = "Storage",
+                            value = String.format(Locale.US, "%.0f%%", dev.memoryStorage.storageUsagePercent),
+                            subtitle = "${UnitFormatters.formatBytesGb(dev.memoryStorage.internalAvailableBytes)} free",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        MetricTile(
+                            label = "Deep Sleep",
+                            value = String.format(Locale.US, "%.0f%%", dev.systemProfile.deepSleepPercent),
+                            subtitle = "Uptime ${UnitFormatters.formatDurationCompact(dev.systemProfile.elapsedRealtimeMs)}",
+                            modifier = Modifier.weight(1f)
+                        )
+                        MetricTile(
+                            label = "24h Screen-On",
+                            value = dev.displaySot.rolling24hScreenOnMs?.let { UnitFormatters.formatDurationCompact(it) } ?: "Grant Usage",
+                            subtitle = dev.displaySot.refreshRateHz?.let { String.format(Locale.US, "%.0f Hz • %s", it, dev.network.transportLabel) } ?: dev.network.transportLabel,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4. Top 24h App Usage Preview Card
+        item {
+            TactileCard(
+                containerColor = MaterialTheme.colorScheme.surface,
+                onClick = onNavigateToAnalytics
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Top 24-Hour Apps",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "View All →",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = semantic.emeraldText
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                if (!hasUsagePermission) {
+                    Text(
+                        text = "Enable Usage Access in Analytics to view rolling 24-hour foreground sessions, timeline, and estimated drain.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (top24hApps.isEmpty()) {
+                    Text(
+                        text = "No foreground app sessions recorded in the past 24 hours.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        top24hApps.forEach { app ->
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "#${app.dailyRank} ${app.appName}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = "${UnitFormatters.formatDurationCompact(app.totalForegroundMs)} • ${app.detectedSessionCount} sess.",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = semantic.emeraldText
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = { (app.usageSharePercent / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp),
+                                    color = semantic.emeraldStroke,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    strokeCap = StrokeCap.Round
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Live Telemetry Curve Card
         item {
             TactileCard(
                 containerColor = MaterialTheme.colorScheme.surface
@@ -312,11 +479,4 @@ fun HomeDashboardScreen(
             }
         }
     }
-}
-
-private fun formatEtaShort(ms: Long): String {
-    val mins = (ms / 60_000L).coerceAtLeast(1L)
-    val h = mins / 60L
-    val m = mins % 60L
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
 }

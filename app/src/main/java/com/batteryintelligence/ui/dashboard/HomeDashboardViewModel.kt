@@ -3,11 +3,15 @@ package com.batteryintelligence.ui.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.batteryintelligence.domain.intelligence.ChargingIntelligenceEngine
+import com.batteryintelligence.domain.model.AppUsageDetail
 import com.batteryintelligence.domain.model.BatterySampleRecord
 import com.batteryintelligence.domain.model.ChargingIntelligenceState
+import com.batteryintelligence.domain.model.DeviceIntelligenceSnapshot
 import com.batteryintelligence.domain.model.MonitoringPreferences
+import com.batteryintelligence.domain.repository.AppUsageRepository
 import com.batteryintelligence.domain.repository.BatteryTelemetryRepository
 import com.batteryintelligence.domain.repository.ChargingSessionRepository
+import com.batteryintelligence.domain.repository.DeviceIntelligenceRepository
 import com.batteryintelligence.domain.repository.PreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -18,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 enum class DashboardTimeWindow(val label: String, val durationMs: Long) {
@@ -32,11 +37,22 @@ class HomeDashboardViewModel @Inject constructor(
     private val batteryTelemetryRepository: BatteryTelemetryRepository,
     chargingSessionRepository: ChargingSessionRepository,
     preferencesRepository: PreferencesRepository,
-    private val chargingIntelligenceEngine: ChargingIntelligenceEngine
+    private val chargingIntelligenceEngine: ChargingIntelligenceEngine,
+    private val deviceIntelligenceRepository: DeviceIntelligenceRepository,
+    private val appUsageRepository: AppUsageRepository
 ) : ViewModel() {
 
     private val _selectedWindow = MutableStateFlow(DashboardTimeWindow.ONE_HOUR)
     val selectedWindow: StateFlow<DashboardTimeWindow> = _selectedWindow.asStateFlow()
+
+    private val _deviceSnapshot = MutableStateFlow<DeviceIntelligenceSnapshot?>(null)
+    val deviceSnapshot: StateFlow<DeviceIntelligenceSnapshot?> = _deviceSnapshot.asStateFlow()
+
+    private val _top24hApps = MutableStateFlow<List<AppUsageDetail>>(emptyList())
+    val top24hApps: StateFlow<List<AppUsageDetail>> = _top24hApps.asStateFlow()
+
+    private val _hasUsagePermission = MutableStateFlow(appUsageRepository.hasUsageStatsPermission())
+    val hasUsagePermission: StateFlow<Boolean> = _hasUsagePermission.asStateFlow()
 
     val preferences: StateFlow<MonitoringPreferences> = preferencesRepository
         .preferences
@@ -73,6 +89,27 @@ class HomeDashboardViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
         )
+
+    init {
+        refreshDashboardIntelligence()
+    }
+
+    fun refreshDashboardIntelligence() {
+        viewModelScope.launch {
+            val granted = appUsageRepository.hasUsageStatsPermission()
+            _hasUsagePermission.value = granted
+            _deviceSnapshot.value = runCatching {
+                deviceIntelligenceRepository.readDeviceIntelligence()
+            }.getOrNull()
+            _top24hApps.value = if (granted) {
+                runCatching {
+                    appUsageRepository.getRolling24HourUsageReport().apps.take(4)
+                }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
+    }
 
     fun selectTimeWindow(window: DashboardTimeWindow) {
         _selectedWindow.value = window

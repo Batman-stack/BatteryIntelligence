@@ -226,6 +226,28 @@ class BatteryNotificationHelper @Inject constructor(
         notifyIfPermitted(LOW_BATTERY_NOTIFICATION_ID, notification)
     }
 
+    fun showChargerDisconnectedAlert(
+        currentLevelPercent: Int?,
+        targetChargePercent: Int
+    ) {
+        if (!hasPostNotificationsPermission()) return
+
+        val levelLabel = currentLevelPercent?.let { "$it%" } ?: "unknown level"
+        val notification = NotificationCompat.Builder(context, CHANNEL_SMART_ALARM_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Charger Disconnected at $levelLabel")
+            .setContentText(
+                "Power disconnected before reaching your $targetChargePercent% charging target."
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(createLaunchPendingIntent())
+            .build()
+
+        notifyIfPermitted(DISCONNECT_ALARM_NOTIFICATION_ID, notification)
+    }
+
     fun cancelTargetChargeAlarm() {
         notificationManager.cancel(TARGET_ALARM_NOTIFICATION_ID)
     }
@@ -289,6 +311,7 @@ class BatteryNotificationHelper @Inject constructor(
         const val TEMP_ALARM_NOTIFICATION_ID = 1003
         const val THERMAL_SLOPE_NOTIFICATION_ID = 1004
         const val LOW_BATTERY_NOTIFICATION_ID = 1005
+        const val DISCONNECT_ALARM_NOTIFICATION_ID = 1006
 
         private const val REQUEST_LAUNCH_APP = 2001
         private const val REQUEST_STOP_SERVICE = 2002

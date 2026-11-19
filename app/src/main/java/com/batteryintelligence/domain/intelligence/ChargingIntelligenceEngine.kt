@@ -39,6 +39,11 @@ class ChargingIntelligenceEngine @Inject constructor(
             thresholds = preferences.speedTierThresholds
         )
 
+        val slopeCPerMin = thermalSlopeAnalyzer.update(
+            timestampMs = snapshot.timestampMs,
+            temperatureCelsius = snapshot.temperatureCelsius
+        )
+
         val targetPercent = (preferences.targetChargeAlertPercent ?: 80).coerceIn(50, 100)
         val capacityForEta = preferences.userDesignCapacityMahOverride
             ?.takeIf { it > 0.0 }
@@ -49,12 +54,8 @@ class ChargingIntelligenceEngine @Inject constructor(
             snapshot = snapshot,
             smoothedCurrentMa = speedResult.smoothedCurrentMa,
             effectiveCapacityMah = capacityForEta,
-            targetPercent = targetPercent
-        )
-
-        val slopeCPerMin = thermalSlopeAnalyzer.update(
-            timestampMs = snapshot.timestampMs,
-            temperatureCelsius = snapshot.temperatureCelsius
+            targetPercent = targetPercent,
+            thermalSlopeCPerMin = slopeCPerMin
         )
 
         val slopeAlertLimit = preferences.thermalSlopeAlertCPerMin ?: 1.2f
@@ -62,6 +63,11 @@ class ChargingIntelligenceEngine @Inject constructor(
         val isSlopeAlert = slopeCPerMin != null && slopeCPerMin >= slopeAlertLimit
 
         val prevCount = if (snapshot.isCharging) _state.value.sessionSampleCount + 1 else 0
+        val isStallOrTrickle = snapshot.isCharging &&
+            (snapshot.levelPercent ?: 0) < 95 &&
+            (snapshot.isNetBatteryDischargingWhilePlugged ||
+                etaEstimate?.isSlowTrickleClamped == true ||
+                (speedResult.smoothedPowerWatts != null && speedResult.smoothedPowerWatts < 2.5 && prevCount >= 5))
 
         val next = ChargingIntelligenceState(
             snapshot = snapshot,
@@ -73,6 +79,7 @@ class ChargingIntelligenceEngine @Inject constructor(
             thermalSlopeCPerMin = slopeCPerMin,
             isThermalSlopeElevated = isSlopeElevated,
             isThermalSlopeAlert = isSlopeAlert,
+            isStallOrTrickleDetected = isStallOrTrickle,
             sessionSampleCount = prevCount
         )
         _state.value = next

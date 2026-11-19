@@ -5,11 +5,13 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.batteryintelligence.data.local.dao.AppUsageSessionDao
 import com.batteryintelligence.data.local.dao.BatterySampleDao
 import com.batteryintelligence.data.local.dao.ChargingSessionDao
 import com.batteryintelligence.data.local.dao.ChargingSessionSampleDao
 import com.batteryintelligence.data.local.dao.DailyBatteryRollupDao
 import com.batteryintelligence.data.local.dao.OvernightLogDao
+import com.batteryintelligence.data.local.entity.AppUsageSessionEntity
 import com.batteryintelligence.data.local.entity.BatterySampleEntity
 import com.batteryintelligence.data.local.entity.ChargingSessionEntity
 import com.batteryintelligence.data.local.entity.ChargingSessionSampleEntity
@@ -22,9 +24,10 @@ import com.batteryintelligence.data.local.entity.OvernightLogEntity
         ChargingSessionEntity::class,
         ChargingSessionSampleEntity::class,
         DailyBatteryRollupEntity::class,
-        OvernightLogEntity::class
+        OvernightLogEntity::class,
+        AppUsageSessionEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(BatteryTypeConverters::class)
@@ -34,6 +37,7 @@ abstract class BatteryDatabase : RoomDatabase() {
     abstract fun chargingSessionSampleDao(): ChargingSessionSampleDao
     abstract fun dailyBatteryRollupDao(): DailyBatteryRollupDao
     abstract fun overnightLogDao(): OvernightLogDao
+    abstract fun appUsageSessionDao(): AppUsageSessionDao
 
     companion object {
         const val DATABASE_NAME = "battery_intelligence.db"
@@ -118,6 +122,31 @@ abstract class BatteryDatabase : RoomDatabase() {
                         updated_at_ms INTEGER NOT NULL
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_usage_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        package_name TEXT NOT NULL,
+                        app_name TEXT NOT NULL,
+                        start_time_ms INTEGER NOT NULL,
+                        end_time_ms INTEGER NOT NULL,
+                        duration_ms INTEGER NOT NULL,
+                        close_reason TEXT NOT NULL,
+                        recorded_at_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_app_usage_sessions_start_time_ms ON app_usage_sessions(start_time_ms)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_app_usage_sessions_package_name_start_time_ms ON app_usage_sessions(package_name, start_time_ms)"
                 )
             }
         }

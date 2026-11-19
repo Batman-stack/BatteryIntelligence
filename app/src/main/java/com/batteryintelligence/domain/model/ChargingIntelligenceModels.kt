@@ -1,5 +1,12 @@
 package com.batteryintelligence.domain.model
 
+data class EtaHistoryPoint(
+    val timestampMs: Long,
+    val levelPercent: Int,
+    val estimatedTimeTo100Ms: Long?,
+    val confidence: ChargingConfidence
+)
+
 data class ChargingEtaEstimate(
     val timeToTargetMs: Long?,
     val targetPercent: Int,
@@ -9,7 +16,9 @@ data class ChargingEtaEstimate(
     val clockTimeAt100Ms: Long?,
     val confidence: ChargingConfidence,
     val chargeRatePercentPerMin: Double?,
-    val isSlowTrickleClamped: Boolean = false
+    val isSlowTrickleClamped: Boolean = false,
+    val isThermalThrottlingAdjusted: Boolean = false,
+    val predictionHistory: List<EtaHistoryPoint> = emptyList()
 )
 
 data class ChargingIntelligenceState(
@@ -22,6 +31,7 @@ data class ChargingIntelligenceState(
     val thermalSlopeCPerMin: Float? = null,
     val isThermalSlopeElevated: Boolean = false,
     val isThermalSlopeAlert: Boolean = false,
+    val isStallOrTrickleDetected: Boolean = false,
     val sessionSampleCount: Int = 0
 )
 

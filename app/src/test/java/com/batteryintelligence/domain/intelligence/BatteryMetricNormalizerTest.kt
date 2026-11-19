@@ -41,7 +41,9 @@ class BatteryMetricNormalizerTest {
     }
 
     @Test
-    fun `normalizeVoltageToMillivolts supports dual-cell series packs and microvolt outliers`() {
+    fun `normalizeVoltageToMillivolts supports whole volts, dual-cell series packs, and microvolt outliers`() {
+        assertEquals(4000, BatteryMetricNormalizer.normalizeVoltageToMillivolts(4))
+        assertEquals(8000, BatteryMetricNormalizer.normalizeVoltageToMillivolts(8))
         assertEquals(4250, BatteryMetricNormalizer.normalizeVoltageToMillivolts(4250))
         assertEquals(8650, BatteryMetricNormalizer.normalizeVoltageToMillivolts(8650))
         assertEquals(4320, BatteryMetricNormalizer.normalizeVoltageToMillivolts(4_320_000))

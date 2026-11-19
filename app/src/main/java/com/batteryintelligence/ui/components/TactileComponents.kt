@@ -156,6 +156,139 @@ fun MetricTile(
 }
 
 @Composable
+fun TactilePillButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    emphasized: Boolean = false
+) {
+    val semantic = LocalBatterySemanticColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val haptic = LocalHapticFeedback.current
+    val hapticsEnabled = LocalHapticsEnabled.current
+    val shape = RoundedCornerShape(14.dp)
+
+    Surface(
+        modifier = modifier
+            .tactilePressScale(enabled = true, interactionSource = interactionSource)
+            .clip(shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    if (hapticsEnabled) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                    onClick()
+                }
+            ),
+        shape = shape,
+        color = if (emphasized) semantic.emeraldStroke else semantic.mintSurface,
+        shadowElevation = if (emphasized) 3.dp else 1.dp,
+        border = BorderStroke(1.dp, if (emphasized) semantic.emeraldStroke else semantic.mintBorder)
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (emphasized) MaterialTheme.colorScheme.onPrimary else semantic.emeraldText
+            )
+        }
+    }
+}
+
+@Composable
+fun AnimatedMetricCounter(
+    value: Float,
+    formatter: (Float) -> String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurface
+) {
+    val reducedMotion = LocalReducedMotion.current
+    val animatedValue by animateFloatAsState(
+        targetValue = value,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = if (reducedMotion) Spring.StiffnessHigh else Spring.StiffnessMediumLow
+        ),
+        label = "animatedMetricCounter"
+    )
+    Text(
+        text = formatter(if (reducedMotion) value else animatedValue),
+        style = MaterialTheme.typography.displayMedium,
+        color = color,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun BatteryHeroRing(
+    levelPercent: Int?,
+    isCharging: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val semantic = LocalBatterySemanticColors.current
+    val reducedMotion = LocalReducedMotion.current
+    val targetFraction = ((levelPercent ?: 0) / 100f).coerceIn(0f, 1f)
+    val animatedFraction by animateFloatAsState(
+        targetValue = targetFraction,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = if (reducedMotion) Spring.StiffnessHigh else Spring.StiffnessLow
+        ),
+        label = "batteryHeroRing"
+    )
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val progressColor = when {
+        isCharging -> semantic.emeraldStroke
+        (levelPercent ?: 100) <= 20 -> semantic.alertStroke
+        else -> semantic.emeraldStroke
+    }
+
+    Box(
+        modifier = modifier.size(116.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(116.dp)) {
+            val strokePx = 10.dp.toPx()
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = strokePx,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round
+            )
+            drawArc(
+                color = trackColor,
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = stroke
+            )
+            drawArc(
+                color = progressColor,
+                startAngle = -90f,
+                sweepAngle = 360f * (if (reducedMotion) targetFraction else animatedFraction),
+                useCenter = false,
+                style = stroke
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = levelPercent?.let { "$it%" } ?: "--%",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = if (isCharging) "Charging" else "Battery",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isCharging) semantic.emeraldText else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun StatusPill(
     text: String,
     textColor: Color,

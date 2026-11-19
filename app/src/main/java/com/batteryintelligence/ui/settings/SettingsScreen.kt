@@ -1,6 +1,7 @@
 package com.batteryintelligence.ui.settings
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +28,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,8 +44,12 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.batteryintelligence.domain.model.AppThemeMode
+import com.batteryintelligence.domain.model.CapacityUnit
 import com.batteryintelligence.domain.model.SpeedTierThresholds
+import com.batteryintelligence.domain.model.TemperatureUnit
 import com.batteryintelligence.ui.components.TactileCard
+import com.batteryintelligence.ui.components.TactilePillButton
+import com.batteryintelligence.ui.components.UnitFormatters
 import com.batteryintelligence.ui.theme.LocalBatterySemanticColors
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -55,6 +61,7 @@ fun SettingsScreen(
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     val serviceNotice by viewModel.serviceNotice.collectAsStateWithLifecycle()
+    val pendingCsvExport by viewModel.pendingCsvExport.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -62,6 +69,7 @@ fun SettingsScreen(
 
     var showCapacityDialog by remember { mutableStateOf(false) }
     var showSpeedTierDialog by remember { mutableStateOf(false) }
+    var showPrivacyDialog by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -71,10 +79,23 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(pendingCsvExport) {
+        val csv = pendingCsvExport ?: return@LaunchedEffect
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_SUBJECT, "Battery Intelligence Telemetry Export (CSV)")
+            putExtra(Intent.EXTRA_TEXT, csv)
+        }
+        runCatching {
+            context.startActivity(Intent.createChooser(shareIntent, "Export Battery Telemetry CSV"))
+        }
+        viewModel.consumePendingCsvExport()
+    }
+
     if (serviceNotice != null) {
         AlertDialog(
             onDismissRequest = { viewModel.dismissServiceNotice() },
-            title = { Text("Foreground Service Notice") },
+            title = { Text("Notice") },
             text = { Text(serviceNotice.orEmpty()) },
             confirmButton = {
                 TextButton(onClick = { viewModel.dismissServiceNotice() }) {
@@ -106,12 +127,17 @@ fun SettingsScreen(
         )
     }
 
+    if (showPrivacyDialog) {
+        LocalPrivacyPolicyDialog(onDismiss = { showPrivacyDialog = false })
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // 1. Monitoring Service
         item {
             TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
                 Text(text = "Monitoring Service", style = MaterialTheme.typography.titleMedium)
@@ -174,6 +200,7 @@ fun SettingsScreen(
             }
         }
 
+        // 2. Smart Charging & Thermal Alerts
         item {
             TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
                 Row(
@@ -195,6 +222,27 @@ fun SettingsScreen(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Charger Disconnected Alert", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "Alert if power disconnects unexpectedly before reaching target level.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = prefs.disconnectAlertEnabled,
+                        onCheckedChange = { viewModel.setDisconnectAlertEnabled(it) }
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 val targetPct = (prefs.targetChargeAlertPercent ?: 80).coerceIn(50, 100)
@@ -210,7 +258,7 @@ fun SettingsScreen(
                 val highTemp = (prefs.highTempAlertCelsius ?: 42.0f).coerceIn(36.0f, 48.0f)
                 SettingSliderRow(
                     label = "High Temperature Threshold",
-                    valueLabel = String.format(Locale.US, "%.1f °C", highTemp),
+                    valueLabel = UnitFormatters.formatTemperature(highTemp, prefs.temperatureUnit),
                     value = highTemp,
                     range = 36f..48f,
                     steps = 23,
@@ -239,12 +287,17 @@ fun SettingsScreen(
             }
         }
 
+        // 3. Calibration & Speed Tiers
         item {
             TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
                 Text(text = "Calibration & Speed Tiers", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Design Capacity: ${prefs.userDesignCapacityMahOverride?.let { String.format(Locale.US, "%.0f mAh (Manual)", it) } ?: "Auto (Device Profile)"}",
+                    text = "Design Capacity: ${
+                        prefs.userDesignCapacityMahOverride?.let {
+                            "${UnitFormatters.formatCapacity(it, prefs.capacityUnit)} (Manual)"
+                        } ?: "Auto (Device Fuel Gauge / Sysfs)"
+                    }",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -272,10 +325,60 @@ fun SettingsScreen(
             }
         }
 
+        // 4. Units, Appearance & Tactile Feedback
         item {
             TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
-                Text(text = "Appearance & Tactile Feedback", style = MaterialTheme.typography.titleMedium)
+                Text(text = "Units, Appearance & Haptics", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Temperature Unit",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TemperatureUnit.entries.forEach { unit ->
+                        FilterChip(
+                            selected = prefs.temperatureUnit == unit,
+                            onClick = { viewModel.updateTemperatureUnit(unit) },
+                            label = { Text("${unit.name.lowercase().replaceFirstChar { it.uppercase() }} (${unit.symbol})") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = semantic.mintSurface,
+                                selectedLabelColor = semantic.emeraldText
+                            )
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Capacity Unit",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CapacityUnit.entries.forEach { unit ->
+                        FilterChip(
+                            selected = prefs.capacityUnit == unit,
+                            onClick = { viewModel.updateCapacityUnit(unit) },
+                            label = { Text(unit.symbol) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = semantic.mintSurface,
+                                selectedLabelColor = semantic.emeraldText
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Theme Mode",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AppThemeMode.entries.forEach { mode ->
                         FilterChip(
@@ -289,6 +392,7 @@ fun SettingsScreen(
                         )
                     }
                 }
+
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -329,7 +433,93 @@ fun SettingsScreen(
                 }
             }
         }
+
+        // 5. Data Export & Database Storage Management
+        item {
+            TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
+                Text(text = "Local Data & Storage", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "All charging sessions, thermal curves, and app usage summaries stay strictly on-device in Room SQLite.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                TactilePillButton(
+                    text = "Export Charging Sessions (CSV)",
+                    onClick = { viewModel.generateCsvExport() },
+                    emphasized = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { viewModel.pruneOldHistory(30) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Prune >30d", color = semantic.emeraldText)
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.pruneOldHistory(90) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Prune >90d", color = semantic.emeraldText)
+                    }
+                }
+            }
+        }
+
+        // 6. Local-First Privacy Policy & Release Info
+        item {
+            TactileCard(containerColor = MaterialTheme.colorScheme.surface) {
+                Text(text = "Privacy & Release Info", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Battery Intelligence v3.0.0 — Personal Release. Zero cloud accounts, zero ads, zero analytics SDKs, zero hidden/root APIs.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(onClick = { showPrivacyDialog = true }) {
+                    Text("View Local-First Privacy & Sensor Policy", color = semantic.emeraldText)
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun LocalPrivacyPolicyDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Local-First Privacy & Sensor Policy") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "100% On-Device Processing: Battery Intelligence never requests INTERNET permission and never transmits battery telemetry, app usage history, or device diagnostics off your phone.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = "Usage Access (Optional): PACKAGE_USAGE_STATS is used exclusively to reconstruct your rolling 24-hour foreground app sessions and timeline inside the Analytics tab.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Public Android APIs Only: All electrical, thermal, memory, storage, and display diagnostics are read strictly from official Android 12–17 APIs and readable kernel files. Unavailable metrics are shown honestly as Unavailable.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = LocalBatterySemanticColors.current.emeraldText)
+            }
+        }
+    )
 }
 
 @Composable

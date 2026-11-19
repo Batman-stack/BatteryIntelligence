@@ -32,4 +32,8 @@ interface ChargingSessionRepository {
     suspend fun getHealthReport(): BatteryHealthReport
 
     fun observeHealthReport(): Flow<BatteryHealthReport>
+
+    suspend fun buildCsvExportReport(): String
+
+    suspend fun pruneDataOlderThanDays(days: Int): Int
 }

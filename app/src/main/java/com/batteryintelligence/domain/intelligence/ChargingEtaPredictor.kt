@@ -5,6 +5,7 @@ import com.batteryintelligence.domain.model.ChargingConfidence
 import com.batteryintelligence.domain.model.ChargingEtaEstimate
 import com.batteryintelligence.domain.model.ChargingPhase
 import com.batteryintelligence.domain.model.ChargingStatus
+import com.batteryintelligence.domain.model.EtaHistoryPoint
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
@@ -23,6 +24,7 @@ class ChargingEtaPredictor @Inject constructor() {
     )
 
     private val samples = ArrayDeque<EtaSample>(MAX_WINDOW_SAMPLES)
+    private val history = ArrayDeque<EtaHistoryPoint>(MAX_HISTORY_POINTS)
     private var sessionStartTimeMs: Long = -1L
     private var sessionStartLevel: Float? = null
     private var peakObservedCurrentMa: Double = 0.0
@@ -31,6 +33,7 @@ class ChargingEtaPredictor @Inject constructor() {
     @Synchronized
     fun reset() {
         samples.clear()
+        history.clear()
         sessionStartTimeMs = -1L
         sessionStartLevel = null
         peakObservedCurrentMa = 0.0
@@ -42,7 +45,8 @@ class ChargingEtaPredictor @Inject constructor() {
         snapshot: BatterySnapshot,
         smoothedCurrentMa: Double?,
         effectiveCapacityMah: Double?,
-        targetPercent: Int
+        targetPercent: Int,
+        thermalSlopeCPerMin: Float? = null
     ): Pair<ChargingEtaEstimate?, ChargingPhase> {
         val safeTarget = targetPercent.coerceIn(50, 100)
 
@@ -59,7 +63,8 @@ class ChargingEtaPredictor @Inject constructor() {
                 clockTimeAtTargetMs = snapshot.timestampMs,
                 clockTimeAt100Ms = snapshot.timestampMs,
                 confidence = ChargingConfidence.HIGH,
-                chargeRatePercentPerMin = 0.0
+                chargeRatePercentPerMin = 0.0,
+                predictionHistory = history.toList()
             ) to ChargingPhase.FULL
         }
         if (snapshot.chargingStatus == ChargingStatus.NOT_CHARGING) {
@@ -71,7 +76,8 @@ class ChargingEtaPredictor @Inject constructor() {
                 clockTimeAtTargetMs = null,
                 clockTimeAt100Ms = null,
                 confidence = ChargingConfidence.CALCULATING,
-                chargeRatePercentPerMin = null
+                chargeRatePercentPerMin = null,
+                predictionHistory = history.toList()
             ) to ChargingPhase.PAUSED
         }
 
@@ -113,7 +119,8 @@ class ChargingEtaPredictor @Inject constructor() {
                 clockTimeAtTargetMs = null,
                 clockTimeAt100Ms = null,
                 confidence = ChargingConfidence.CALCULATING,
-                chargeRatePercentPerMin = null
+                chargeRatePercentPerMin = null,
+                predictionHistory = history.toList()
             ) to phase
         }
 
@@ -123,7 +130,7 @@ class ChargingEtaPredictor @Inject constructor() {
         )
         val empiricalRatePctPerMin = computeEmpiricalRatePctPerMin()
 
-        val baseRatePctPerMin = when {
+        val rawBaseRate = when {
             coulombRatePctPerMin != null && empiricalRatePctPerMin != null -> {
                 val ratioDiff = abs(coulombRatePctPerMin - empiricalRatePctPerMin) /
                     maxOf(coulombRatePctPerMin, empiricalRatePctPerMin, 0.01)
@@ -138,8 +145,8 @@ class ChargingEtaPredictor @Inject constructor() {
             else -> null
         }
 
-        if (baseRatePctPerMin == null || baseRatePctPerMin <= MIN_VALID_RATE_PCT_PER_MIN) {
-            val isTrickle = baseRatePctPerMin != null && baseRatePctPerMin > 0.0
+        if (rawBaseRate == null || rawBaseRate <= MIN_VALID_RATE_PCT_PER_MIN) {
+            val isTrickle = rawBaseRate != null && rawBaseRate > 0.0
             return ChargingEtaEstimate(
                 timeToTargetMs = null,
                 targetPercent = safeTarget,
@@ -148,15 +155,21 @@ class ChargingEtaPredictor @Inject constructor() {
                 clockTimeAtTargetMs = null,
                 clockTimeAt100Ms = null,
                 confidence = if (isTrickle) ChargingConfidence.LOW else ChargingConfidence.CALCULATING,
-                chargeRatePercentPerMin = baseRatePctPerMin,
-                isSlowTrickleClamped = isTrickle
+                chargeRatePercentPerMin = rawBaseRate,
+                isSlowTrickleClamped = isTrickle,
+                predictionHistory = history.toList()
             ) to phase
         }
+
+        val tempC = snapshot.temperatureCelsius
+        val thermalThrottleFactor = computeThermalThrottlingFactor(tempC, thermalSlopeCPerMin)
+        val effectiveRatePctPerMin = rawBaseRate / thermalThrottleFactor
+        val isThermalAdjusted = thermalThrottleFactor > 1.01
 
         val rawTimeTo100Ms = integrateRemainingTimeMs(
             currentSoc = currentLevel.toDouble(),
             targetSoc = 100.0,
-            baseRatePctPerMin = baseRatePctPerMin
+            baseRatePctPerMin = effectiveRatePctPerMin
         )
         val rawTimeToTargetMs = if (currentLevel >= safeTarget) {
             0L
@@ -164,7 +177,7 @@ class ChargingEtaPredictor @Inject constructor() {
             integrateRemainingTimeMs(
                 currentSoc = currentLevel.toDouble(),
                 targetSoc = safeTarget.toDouble(),
-                baseRatePctPerMin = baseRatePctPerMin
+                baseRatePctPerMin = effectiveRatePctPerMin
             )
         }
         val rawTimeTo80Ms = if (currentLevel >= 80f) {
@@ -173,7 +186,7 @@ class ChargingEtaPredictor @Inject constructor() {
             integrateRemainingTimeMs(
                 currentSoc = currentLevel.toDouble(),
                 targetSoc = 80.0,
-                baseRatePctPerMin = baseRatePctPerMin
+                baseRatePctPerMin = effectiveRatePctPerMin
             )
         }
 
@@ -188,7 +201,15 @@ class ChargingEtaPredictor @Inject constructor() {
             coulombRate = coulombRatePctPerMin,
             empiricalRate = empiricalRatePctPerMin,
             effectiveCapacityMah = effectiveCapacityMah,
-            hasCurrentSensor = absCurrentMa != null
+            hasCurrentSensor = absCurrentMa != null,
+            isThermalAdjusted = isThermalAdjusted
+        )
+
+        recordHistoryIfDue(
+            timestampMs = snapshot.timestampMs,
+            levelPercent = currentLevel.toInt(),
+            eta100Ms = clamped100Ms,
+            confidence = confidence
         )
 
         return ChargingEtaEstimate(
@@ -199,9 +220,52 @@ class ChargingEtaPredictor @Inject constructor() {
             clockTimeAtTargetMs = clampedTargetMs?.let { snapshot.timestampMs + it },
             clockTimeAt100Ms = clamped100Ms?.let { snapshot.timestampMs + it },
             confidence = confidence,
-            chargeRatePercentPerMin = baseRatePctPerMin,
-            isSlowTrickleClamped = isTrickleClamped
+            chargeRatePercentPerMin = effectiveRatePctPerMin,
+            isSlowTrickleClamped = isTrickleClamped,
+            isThermalThrottlingAdjusted = isThermalAdjusted,
+            predictionHistory = history.toList()
         ) to phase
+    }
+
+    private fun computeThermalThrottlingFactor(
+        temperatureCelsius: Float?,
+        thermalSlopeCPerMin: Float?
+    ): Double {
+        var factor = 1.0
+        if (temperatureCelsius != null) {
+            when {
+                temperatureCelsius >= 44.0f -> factor *= 1.30
+                temperatureCelsius >= 41.0f -> factor *= 1.15
+            }
+        }
+        if (thermalSlopeCPerMin != null && thermalSlopeCPerMin >= 1.0f) {
+            factor *= 1.10
+        }
+        return factor.coerceIn(1.0, 1.50)
+    }
+
+    private fun recordHistoryIfDue(
+        timestampMs: Long,
+        levelPercent: Int,
+        eta100Ms: Long?,
+        confidence: ChargingConfidence
+    ) {
+        val last = history.lastOrNull()
+        val elapsedSinceLast = if (last != null) timestampMs - last.timestampMs else Long.MAX_VALUE
+        val levelMoved = last?.levelPercent != levelPercent
+        if (last == null || elapsedSinceLast >= HISTORY_RECORD_GAP_MS || levelMoved) {
+            if (history.size >= MAX_HISTORY_POINTS) {
+                history.removeFirst()
+            }
+            history.addLast(
+                EtaHistoryPoint(
+                    timestampMs = timestampMs,
+                    levelPercent = levelPercent,
+                    estimatedTimeTo100Ms = eta100Ms,
+                    confidence = confidence
+                )
+            )
+        }
     }
 
     private fun detectChargingPhase(currentSoc: Float, absCurrentMa: Double?): ChargingPhase {
@@ -243,9 +307,6 @@ class ChargingEtaPredictor @Inject constructor() {
         return rate.takeIf { it.isFinite() && it > 0.0 }
     }
 
-    /**
-     * Piecewise CC -> CV taper integration across 5% SoC buckets above the taper knee (80-85%).
-     */
     private fun integrateRemainingTimeMs(
         currentSoc: Double,
         targetSoc: Double,
@@ -266,7 +327,6 @@ class ChargingEtaPredictor @Inject constructor() {
             val mid = (cursor + next) / 2.0
             val deltaSoc = next - cursor
             val targetMultiplier = taperMultiplierForSoc(mid, knee)
-            // If we are already inside CV, baseRatePctPerMin is already slowed by currentBucketMultiplier
             val relativeSlowdown = (targetMultiplier / currentBucketMultiplier).coerceAtLeast(1.0)
             totalMinutes += (deltaSoc / baseRatePctPerMin) * relativeSlowdown
             cursor = next
@@ -298,7 +358,8 @@ class ChargingEtaPredictor @Inject constructor() {
         coulombRate: Double?,
         empiricalRate: Double?,
         effectiveCapacityMah: Double?,
-        hasCurrentSensor: Boolean
+        hasCurrentSensor: Boolean,
+        isThermalAdjusted: Boolean
     ): ChargingConfidence {
         val powerValues = samples.mapNotNull { it.powerWatts }
         val cv = computeCoefficientOfVariation(powerValues)
@@ -314,7 +375,12 @@ class ChargingEtaPredictor @Inject constructor() {
             false
         }
 
-        return if (elapsedMs >= 180_000L && pathsAgree && effectiveCapacityMah != null && (cv == null || cv < 0.15)) {
+        return if (!isThermalAdjusted &&
+            elapsedMs >= 180_000L &&
+            pathsAgree &&
+            effectiveCapacityMah != null &&
+            (cv == null || cv < 0.15)
+        ) {
             ChargingConfidence.HIGH
         } else {
             ChargingConfidence.MEDIUM
@@ -331,6 +397,8 @@ class ChargingEtaPredictor @Inject constructor() {
 
     companion object {
         const val MAX_WINDOW_SAMPLES = 45
+        const val MAX_HISTORY_POINTS = 8
+        const val HISTORY_RECORD_GAP_MS = 60_000L
         const val MIN_STABILIZATION_MS = 45_000L
         const val MIN_SAMPLES_FOR_ETA = 3
         const val DEFAULT_TAPER_KNEE_PERCENT = 80f
